@@ -27,3 +27,11 @@ pub enum Instruction {
     DBUG,
     BRK
 }
+
+#[deriving(Show)]
+pub enum NamedInstruction {
+    Raw(Instruction),
+    NSEL(String, String),
+    NTSEL(String, String),
+    NLDF(String)
+}
