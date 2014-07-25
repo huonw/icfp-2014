@@ -1,3 +1,5 @@
+mod asm;
+
 fn main() {
-    println!("hello world")
+    println!("instruction: {}", asm::LDC(1))
 }
