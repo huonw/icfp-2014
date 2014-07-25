@@ -155,6 +155,21 @@ pub fn compile(queue: &[LabelOrInstruction]) -> Vec<Instruction> {
             Inst(NLDF(ref x)) => ret.push(LDF(*labels.get(&x.as_slice()))),
         }
     }
-    
+
+    ret
+}
+pub fn print(code: &[Instruction]) -> String {
+    let mut ret = String::new();
+
+    for inst in code.iter() {
+        let val = match *inst {
+            LDC(x) => format!("LDC {}", x),
+            LDF(x) => format!("LDF {}", x),
+            AP(x) => format!("AP {}", x),
+            _ => inst.to_string(),
+        };
+        ret.push_str(val.as_slice());
+        ret.push_str("\n");
+    }
     ret
 }
