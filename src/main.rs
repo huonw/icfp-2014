@@ -6,5 +6,6 @@ mod asm;
 
 fn main() {
     let string = io::stdin().read_to_string().unwrap();
-    println!("{}", asm::parse(string.as_slice()));
+    let x = asm::parse(string.as_slice());
+    println!("{}", asm::compile(x.as_slice()));
 }

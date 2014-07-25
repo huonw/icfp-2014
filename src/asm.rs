@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 #[deriving(Show)]
 pub enum Instruction {
     LDC(u32),
@@ -130,4 +132,29 @@ pub fn parse(s: &str) -> Vec<LabelOrInstruction> {
         }
     }
     return result;
+}
+
+pub fn compile(queue: &[LabelOrInstruction]) -> Vec<Instruction> {
+    let mut labels = HashMap::new();
+    let mut instruction_count = 0u32;
+    let mut ret = vec![];
+
+    for inst_or_label in queue.iter() {
+        match *inst_or_label {
+            Label(ref label) => { labels.insert(label.as_slice(), instruction_count); }
+            _ => instruction_count += 1,
+        }
+    }
+
+    for inst_or_label in queue.iter() {
+        match *inst_or_label {
+            Label(_) => {}
+            Inst(Raw(inst)) => ret.push(inst),
+            Inst(NSEL(ref x, ref y)) => ret.push(SEL(*labels.get(&x.as_slice()), *labels.get(&y.as_slice()))),
+            Inst(NTSEL(ref x, ref y)) => ret.push(TSEL(*labels.get(&x.as_slice()), *labels.get(&y.as_slice()))),
+            Inst(NLDF(ref x)) => ret.push(LDF(*labels.get(&x.as_slice()))),
+        }
+    }
+    
+    ret
 }
