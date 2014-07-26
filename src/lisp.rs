@@ -20,7 +20,7 @@ enum TopLevelValue {
 struct FnInfo<'a> {
     name: &'a str,
     args: Rc<Env<'a>>,
-    body: &'a AST
+    body: &'a [AST]
 }
 
 struct State<'a,'b> {
@@ -117,7 +117,8 @@ fn top_level_pass<'a>(code: &'a [AST]) -> (HashMap<&'a str, TopLevelValue>, Vec<
 
         match decl.as_slice() {
             [Atom(ref defun), Atom(ref name),
-             Sequence(ref args), ref body] if defun.as_slice() == "defun" => {
+             Sequence(ref args),
+             .. body] if defun.as_slice() == "defun" => {
                 assert!(globals.insert(name.as_slice(), Fun(name.to_string())),
                         "can't override function named {}", name)
                 let arg_map = args.iter().enumerate().map(|(i, arg)| {
@@ -194,7 +195,7 @@ impl<'a, 'b> State<'a, 'b> {
         asm
     }
 
-    fn compile_section(body: &'a AST, name: String, fn_name: String,
+    fn compile_section(body: &'a [AST], name: String, fn_name: String,
                        env: Rc<Env<'a>>, branch_count: &mut uint,
                        globals: &HashMap<&'a str, TopLevelValue>, tail: Instruction)
                            -> (Vec<LabelOrInstruction>, Vec<Vec<LabelOrInstruction>>) {
@@ -206,8 +207,9 @@ impl<'a, 'b> State<'a, 'b> {
             branch_count: branch_count,
             globals: globals
         };
-
-        state.compile_expr(body);
+        for thing in body.iter() {
+            state.compile_expr(thing);
+        }
         state.push_raw(tail);
         let State { asm, branches, .. } = state;
         (asm, branches)
@@ -260,13 +262,15 @@ impl<'a, 'b> State<'a, 'b> {
 
                         let label_t = self.get_next_label("branch");
                         let (asm_t, branches_t) =
-                            State::compile_section(&things[2], label_t.clone(),
+                            State::compile_section(things.slice(2, 3),
+                                                   label_t.clone(),
                                                    self.fn_name.clone(),
                                                    self.env.clone(),
                                                    self.branch_count, self.globals, asm::JOIN);
                         let label_f = self.get_next_label("branch");
                         let (asm_f, branches_f) =
-                            State::compile_section(&things[3], label_f.clone(),
+                            State::compile_section(things.slice(3, 4),
+                                                   label_f.clone(),
                                                    self.fn_name.clone(),
                                                    self.env.clone(),
                                                    self.branch_count, self.globals, asm::JOIN);
@@ -299,7 +303,7 @@ impl<'a, 'b> State<'a, 'b> {
                     }
                     Atom(ref name) if name.as_slice() == "let" => {
                         // (let ((name expression) ...) value)
-                        assert!(num_args == 2, "let needs two things, got {}", num_args);
+                        assert!(num_args >= 2, "let needs two things, got {}", num_args);
 
                         let pairs = match things[1] {
                             Sequence(ref pairs) => {
@@ -325,10 +329,12 @@ impl<'a, 'b> State<'a, 'b> {
                             parent: Some(self.env.clone())
                         });
 
+                        // evaluate all the things
                         let (let_asm, let_branches) =
-                            State::compile_section(&things[2], let_label,
+                            State::compile_section(things.slice_from(2),
+                                                   let_label.clone(),
                                                    self.fn_name.clone(),
-                                                   env,
+                                                   env.clone(),
                                                    self.branch_count, self.globals, asm::RTN);
                         self.branches.push(let_asm);
                         self.branches.push_all_move(let_branches);
