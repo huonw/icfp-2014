@@ -2,15 +2,18 @@
 
 (include "consts.lisp")
 (include "functions.lisp")
+(include "map-functions.lisp")
 
 (defun main (world undefined)
-  (cons
-   (cons 0 (make-list 200 (cons 0 0)))
-   step))
+  (let ((pills (pills world)))
+    (cons
+      (cons 0 (cons pills (make-list 200 (cons 0 0))))
+      step)))
 
 (defun step (state world)
   (let ((tick (car state))
-        (last-visited (cdr state))
+        (pills (car (cdr state))
+        (last-visited (cdr (cdr state)))
         (player (car (cdr world)))
         (world-map (car world))
         (ghost-info (tuple-nth world 4 2)))
@@ -59,39 +62,73 @@
                                                                            0
                                                                            ghosts)))))
                            (if (atom maybe-no-ghost)
-                              ; none of the them, so find the point
-                              ; we've visited the least recently
-                              (let ((point
-                                     (car
-                                      (cdr
-                                       ; the points are ordered from
-                                       ; least to most recent, so find
-                                       ; shortcircuiting on the first
-                                       ; one is perfect
-                                       (find
-                                        (lambda (xy)
-                                          (let ((x (car xy)) (y (cdr xy)))
-                                          ; check if this point is next to us.
-                                            (or (and (= x player-x)
-                                                  (= 1 (abs (- y player-y))))
-                                               (and (= 1 (abs (- x player-x)))
-                                                  (= y player-y)))))
-                                        last-visited)))))
-                                (dbug 101910912)
-                                (dbug player-pos)
-                                (cons
-                                 (let ((point-x (car point)) (point-y (cdr point)))
-                                   (if (> point-x player-x) RIGHT
-                                     (if (> player-x point-x) LEFT
-                                       (if (> point-y player-y) DOWN
-                                         UP))))
-                                 point))
+                              ; none of the the ghostless open squares, find distant pill to bear towards
+                              (let ((result (choose-direction-and-update-pills pills player-pos world-map)))
+                                (set pills (cdr result))
+                                (let ((maybe-distant-pill (car result)))
+                                  (if (eq maybe-distant-pill -1)
+                                    ; no pills left seemingly? worrying... anyway find point
+                                    ; we've visited the least recently
+                                    (let ((point
+                                           (car
+                                            (cdr
+                                             ; the points are ordered from
+                                             ; least to most recent, so find
+                                             ; shortcircuiting on the first
+                                             ; one is perfect
+                                             (find
+                                              (lambda (xy)
+                                                (let ((x (car xy)) (y (cdr xy)))
+                                                ; check if this point is next to us.
+                                                  (or (and (= x player-x)
+                                                        (= 1 (abs (- y player-y))))
+                                                     (and (= 1 (abs (- x player-x)))
+                                                        (= y player-y)))))
+                                              last-visited)))))
+                                      (dbug 101910912)
+                                      (dbug player-pos)
+                                      (cons ; TODO: default to choose-direction's choice (and update `pills` in line with what choose-direction says)
+                                       (let ((point-x (car point)) (point-y (cdr point)))
+                                         (if (> point-x player-x) RIGHT
+                                           (if (> player-x point-x) LEFT
+                                             (if (> point-y player-y) DOWN
+                                               UP))))
+                                       point))
+                                    maybe-distant-pill)))
                              maybe-no-ghost))
                           maybe-new))
                     maybe-pill))))
             (cons
              (cons (+ tick 1) (push-back (cdr last-visited) (cdr move)))
-             (car move))))))))
+             (car move)))))))))
+
+(defun choose-direction-and-update-pills (pills player-pos map)
+  (cons ; big indented expr block returns a direction (-1 for failure)
+    (if (atom pills) -1 ; fail: just pick a direction
+      (let (pill (car pills))
+        (set pills (cdr pills)) ; this one is now shotgunned (regardless of whether it remains a pill or not)
+        (let ((pill-x (car pill)) (pill-y (cdr pill)))
+          (if (pill-or-better (2d-nth map pill-x pill-y)) ; pill still there
+            (let ((player-x (car player-pos)) (player-y (cdr player-pos)))
+              ; choose direction taking us towards a pill
+              (let ((abs-x (abs (- player-x pill-x))) (abs-y (abs (- player-y pill-y))))
+                (if (>= abs-x abs-y)
+                  (if (>= pill-x player-x) RIGHT LEFT)
+                  (if (>= pill-y player-y) DOWN UP)
+                )
+              )
+            )
+            ; else move onto next pill
+            (let ((result (choose-direction-and-update-pills (cdr pills) player-pos map)))
+              (set pills (cdr result))
+              (car result) ; return the direction chosen by recursive call
+            )
+          )
+        )
+      )
+    )
+  pills)) ; return (cons direction new-pill-list) pair
+
 
 (defun generate-ghost-pos (ghost-info)
   (if (atom ghost-info) 0
