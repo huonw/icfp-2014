@@ -19,7 +19,7 @@
    (list-nth tup n)))
 
 ; length of list
-(defun length (list) (if (atom list) 0)(+ 1 (length (cdr list))))
+(defun length (list) (if (atom list) 0 (+ 1 (length (cdr list)))))
 
 (defun foldl (f args z list)
   (if (atom list)
@@ -42,7 +42,7 @@
 ; create a new list applying f to each element of list
 ;
 ; (passes args and the index i to each invocation)
-(defun mapi (f args list) (__map f args list 0))
+(defun mapi (f args list) (__mapi f args list 0))
 
 (defun __mapi (f args list i)
   (if
