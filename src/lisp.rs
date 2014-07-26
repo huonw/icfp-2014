@@ -1,3 +1,4 @@
+use std::io::File;
 use regex::{Regex, Captures};
 
 use asm::{mod, LabelOrInstruction, Label, Inst, Raw};
@@ -22,8 +23,16 @@ struct FnInfo<'a> {
 }
 
 pub fn parse(code: &str) -> AST {
+    static INCLUDES: Regex = regex!(r#"\(\s*include\s*"([^"]*)"\s*\)"#); // " eurgh, syntax highlighter hack
+
+    let code = INCLUDES.replace_all(code, |captures: &Captures| {
+        let filename = captures.at(1);
+        // errors, what errors?
+        File::open(&Path::new(filename)).unwrap().read_to_string().unwrap()
+    });
+
     static REPLACE: Regex = regex!("[()]|;.*");
-    let code = REPLACE.replace_all(code, |captures: &Captures| {
+    let code = REPLACE.replace_all(code.as_slice(), |captures: &Captures| {
         match captures.at(0) {
             p @ "(" | p @ ")" => format!(" {} ", p),
             _comment => "".to_string()

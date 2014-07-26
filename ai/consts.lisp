@@ -14,13 +14,3 @@
 (const FRUIT 4)
 (const LAMBDA_MAN_START 5)
 (const GHOST_START 6)
-
-(defun main ()
-  (cons 0 step))
-
-; walk in each of the three directions.
-(defun step (state world)
-  (if
-      (eq state 3)
-      (cons 0 state)
-    (cons (add state 1) state)))
