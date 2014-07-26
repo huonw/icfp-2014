@@ -43,6 +43,7 @@ pub enum LabelOrInstruction {
     Inst(NamedInstruction)
 }
 
+#[allow(dead_code)]
 pub fn parse(s: &str) -> Vec<LabelOrInstruction> {
     let mut result = vec![];
 
@@ -183,10 +184,10 @@ pub fn print(code: &[Instruction]) -> String {
 pub fn print_label_or_inst(lab_or_inst: &LabelOrInstruction) -> String {
     match *lab_or_inst {
         Label(ref l) => format!("{}:", *l),
-        Inst(NSEL(ref x, ref y)) => format!("SEL {} {}", *x, *y),
-        Inst(NTSEL(ref x, ref y)) => format!("TSEL {} {}", *x, *y),
-        Inst(NLDF(ref x)) => format!("LDF {}", *x),
-        Inst(Raw(inst)) => print_inst(&inst)
+        Inst(NSEL(ref x, ref y)) => format!("   SEL {} {}", *x, *y),
+        Inst(NTSEL(ref x, ref y)) => format!("   TSEL {} {}", *x, *y),
+        Inst(NLDF(ref x)) => format!("   LDF {}", *x),
+        Inst(Raw(inst)) => format!("   {}", print_inst(&inst))
     }
 }
 pub fn print_labelled(code: &[LabelOrInstruction]) -> String {
