@@ -12,34 +12,59 @@
   (let ((tick (car state))
         (last-visited (cdr state))
         (player (car (cdr world)))
-        (map (car world)))
-    (let ((player-pos (car (cdr player))))
+        (world-map (car world))
+        (ghost-info (tuple-nth world 4 2)))
+
+    (let ((player-pos (car (cdr player)))
+          (ghosts (map (lambda (x) (tuple-nth x 3 1)) ghost-info)))
+
       (let ((player-x (car player-pos))
             (player-y (cdr player-pos)))
-        (let ((player-row (list-nth map player-y)))
+        (let ((player-row (list-nth world-map player-y)))
+
           (let
               ((move
                 (let
+                    ; check for nearby pills (hopefully avoiding ghosts)
                     ((maybe-pill
-                      (check-surrounds map player-row player-x player-y pill-or-better)))
+                      (check-surrounds world-map player-row player-x player-y
+                                       (lambda (value x y)
+                                         (check-and-not-old-or-ghost pill-or-better
+                                                                     value x y
+                                                                     last-visited
+                                                                     ghosts)))))
                   (if (atom maybe-pill)
+                      ; no pill nearby
                       (let
+                          ; check for open squares we haven't visited
+                          ; recently (hopefully avoiding ghosts)
                           ((maybe-new
-                            (check-surrounds map player-row
+                            (check-surrounds world-map player-row
                                              player-x player-y
                                              (lambda (value x y)
-                                               (not-a-wall-or-old value x y last-visited)))))
+                                               (check-and-not-old-or-ghost not-a-wall
+                                                                       value x y
+                                                                       last-visited
+                                                                       ghosts)))))
                         (if (atom maybe-new)
+                            ; none of the them, so find the point
+                            ; we've visited the least recently
                             (let ((point
-                                   (car (cdr (find
-                                              (lambda (xy)
-                                                (let ((x (car xy)) (y (cdr xy)))
-                                        ; check if this point is near us now
-                                                  (or (and (= x player-x)
-                                                        (= 1 (abs (- y player-y))))
-                                                     (and (= 1 (abs (- x player-x)))
-                                                        (= y player-y)))))
-                                              last-visited)))))
+                                   (car
+                                    (cdr
+                                     ; the points are ordered from
+                                     ; least to most recent, so find
+                                     ; shortcircuiting on the first
+                                     ; one is perfect
+                                     (find
+                                      (lambda (xy)
+                                        (let ((x (car xy)) (y (cdr xy)))
+                                        ; check if this point is next to us.
+                                          (or (and (= x player-x)
+                                                (= 1 (abs (- y player-y))))
+                                             (and (= 1 (abs (- x player-x)))
+                                                (= y player-y)))))
+                                      last-visited)))))
                               (cons
                                (let ((point-x (car point)) (point-y (cdr point)))
                                  (if (> point-x player-x) RIGHT
@@ -56,14 +81,17 @@
 (defun not-a-wall (value)
   (>= value EMPTY))
 
-(defun not-a-wall-or-old (value x y old-points)
-  (if (not-a-wall value)
-      (point-not-in-list (cons x y) old-points)
-    0))
-
 ; don't count the starting places
-(defun pill-or-better (value x y)
+(defun pill-or-better (value)
   (and (>= value PILL) (>= POWER_PILL value)))
+
+(defun check-and-not-old-or-ghost (f value x y old-points ghosts)
+  (let ((point (cons x y)))
+    (if (f value)
+        (if (point-not-in-list point ghosts)
+            (point-not-in-list (cons x y) old-points)
+          0)
+      0)))
 
 ; call `f' on the cell values in each of the directions, returning the
 ; first returns true (or -1 if they're all false)
