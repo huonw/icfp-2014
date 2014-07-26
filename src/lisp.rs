@@ -1,7 +1,7 @@
 use std::io::File;
 use regex::{Regex, Captures};
 
-use asm::{mod, LabelOrInstruction, Label, Inst, Raw};
+use asm::{mod, LabelOrInstruction, Instruction, NamedInstruction, Label, Inst, Raw};
 use std::collections::HashMap;
 
 #[deriving(Show, Eq, PartialEq)]
@@ -20,6 +20,16 @@ struct FnInfo<'a> {
     name: &'a str,
     args: HashMap<&'a str, u32>,
     body: &'a AST
+}
+
+struct State<'a,'b> {
+    // local stuff:
+    args: &'b HashMap<&'a str, u32>,
+    branches: Vec<Vec<LabelOrInstruction>>,
+    asm: Vec<LabelOrInstruction>,
+    // global stuff:
+    branch_count: &'b mut uint,
+    globals: &'b HashMap<&'a str, TopLevelValue>
 }
 
 pub fn parse(code: &str) -> AST {
@@ -66,29 +76,7 @@ pub fn parse(code: &str) -> AST {
 
     Sequence(curr)
 }
-/*
-(defun main () f)
-(defun f () 1)
 
-(if condition true false)
-add/mul/...
-(<x> ...)
-*/
-pub fn compile(code: &AST) -> Vec<LabelOrInstruction> {
-    let fns = match *code {
-        Atom(_) | Integer(_) => fail!("bare literal supplied"),
-        Sequence(ref fns) => fns,
-    };
-    let (globals, fns) = top_level_pass(fns.as_slice());
-    let mut branch_count = 0;
-
-    let mut ret = vec![];
-    for func in fns.iter() {
-        ret.push_all_move(compile_top_level(func, &mut branch_count, &globals))
-    }
-
-    ret
-}
 
 fn top_level_pass<'a>(code: &'a [AST]) -> (HashMap<&'a str, TopLevelValue>, Vec<FnInfo<'a>>) {
     let mut globals = HashMap::new();
@@ -129,142 +117,189 @@ fn top_level_pass<'a>(code: &'a [AST]) -> (HashMap<&'a str, TopLevelValue>, Vec<
     (globals, fns)
 }
 
-fn compile_top_level<'a>(code: &FnInfo<'a>, branch_count: &mut uint,
-                             globals: &HashMap<&'a str, TopLevelValue>) -> Vec<LabelOrInstruction> {
-    let mut ret = vec![];
-    ret.push(Label(code.name.to_string()));
-    let mut branches = vec![];
-    ret.push_all_move(compile_expr(code.body, &code.args, branch_count, &mut branches, globals));
-    ret.push(Inst(Raw(asm::RTN)));
+/*
+(defun main () f)
+(defun f () 1)
 
-    ret.extend(branches.move_iter().flat_map(|branch| branch.move_iter()));
-    ret
+(if condition true false)
+add/mul/...
+(<x> ...)
+*/
+pub fn compile(code: &AST) -> Vec<LabelOrInstruction> {
+    let fns = match *code {
+        Atom(_) | Integer(_) => fail!("bare literal supplied"),
+        Sequence(ref fns) => fns,
+    };
+    let (globals, fns) = top_level_pass(fns.as_slice());
+    let mut branch_count = 0;
+
+    let mut asm = vec![];
+    for func in fns.iter() {
+        asm.push_all_move(State::compile_fn(func, &mut branch_count, &globals))
+    }
+
+    asm
 }
 
+impl<'a, 'b> State<'a, 'b> {
+    pub fn compile_fn<'a>(code: &FnInfo<'a>, branch_count: &mut uint,
+                          globals: &HashMap<&'a str, TopLevelValue>) -> Vec<LabelOrInstruction> {
+        let (mut asm, branches) = State::compile_section(code.body, code.name.to_string(),
+                                                     &code.args, branch_count, globals, asm::RTN);
+        asm.extend(branches.move_iter().flat_map(|branch| branch.move_iter()));
+        asm
+    }
 
-pub fn compile_expr<'a>(code: &'a AST, args: &HashMap<&'a str, u32>,
-                        branch_count: &mut uint,
-                        branches: &mut Vec<Vec<LabelOrInstruction>>,
-                        globals: &HashMap<&'a str, TopLevelValue>) -> Vec<LabelOrInstruction> {
-    match *code {
-        Integer(x) => vec![Inst(Raw(asm::LDC(x)))],
-        Atom(ref name) => {
-            match args.find(&name.as_slice()) {
-                Some(&num) => vec![Inst(Raw(asm::LD(0, num)))],
-                None => {
-                    match globals.find(&name.as_slice()) {
-                        Some(&Const(num)) => vec![Inst(Raw(asm::LDC(num)))],
-                        Some(&Fun(ref name)) => vec![Inst(asm::NLDF(name.to_string()))],
-                        None => fail!("no such fn or variable '{}'", name)
-                    }
-                }
-            }
-        }
-        Sequence(ref things) => {
-            assert!(!things.is_empty(), "compiling empty sequence");
+    fn compile_section(body: &'a AST, name: String, args: &HashMap<&'a str, u32>, branch_count: &mut uint,
+                           globals: &HashMap<&'a str, TopLevelValue>, tail: Instruction)
+                           -> (Vec<LabelOrInstruction>, Vec<Vec<LabelOrInstruction>>) {
+        let mut state = State {
+            args: args,
+            branches: vec![],
+            asm: vec![Label(name)],
+            branch_count: branch_count,
+            globals: globals
+        };
 
-            let mut ret = vec![];
+        state.compile_expr(body);
+        state.push_raw(tail);
+        let State { asm, branches, .. } = state;
+        (asm, branches)
+    }
 
-            let head = &things[0];
+    fn get_next_label(&mut self) -> String {
+        *self.branch_count += 1;
+        format!("branch-{}", *self.branch_count)
+    }
 
-            match *head {
-                Atom(ref name) if name.as_slice() == "if" => {
-                    // (if cond true false)
-                    let cond = compile_expr(&things[1], args, branch_count, branches, globals);
+    fn push_raw(&mut self, inst: Instruction) {
+        self.asm.push(Inst(Raw(inst)))
+    }
 
-                    let label_t = format!("branch-{}", branch_count);
-                    *branch_count += 1;
-                    let mut t = compile_expr(&things[2], args, branch_count, branches, globals);
+    fn push(&mut self, inst: NamedInstruction) {
+        self.asm.push(Inst(inst))
+    }
 
-                    let label_f = format!("branch-{}", branch_count);
-                    *branch_count += 1;
-                    let mut f = compile_expr(&things[3], args, branch_count, branches, globals);
-
-                    ret.push_all_move(cond);
-                    ret.push(Inst(asm::NSEL(label_t.clone(), label_f.clone())));
-
-                    t.insert(0, Label(label_t));
-                    t.push(Inst(Raw(asm::JOIN)));
-
-                    f.insert(0, Label(label_f));
-                    f.push(Inst(Raw(asm::JOIN)));
-
-                    branches.push(t);
-                    branches.push(f);
-
-                    return ret;
-                }
-                _ => {}
-            }
-
-            // compile everything except the function.
-            for thing in things.tail().iter() {
-                ret.push_all_move(compile_expr(thing, args, branch_count, branches, globals))
-            }
-
-            let num_args = things.len() - 1;
-
-            match *head {
-                Atom(ref head) => {
-                    macro_rules! x {
-                        ($inst: ident, $args: expr) => {
-                            Some((asm::$inst, $args))
-                        }
-                    }
-
-                    let head = head.as_slice();
-                    let inst_args = match head {
-                        // just executes its arguments in sequence,
-                        // which has already happened at this point.
-                        // (do (x y z) (a b c) (d e f))
-                        "do" => {
-                            return ret
-                        }
-                        "add" | "mul" => {
-                            // (add a b c d ...)
-
-                            let is_mul = head == "mul";
-
-                            if num_args == 0 {
-                                ret.push(Inst(Raw(asm::LDC(is_mul as i32))))
-                            } else {
-                                let inst = if is_mul {asm::MUL} else {asm::ADD};
-
-                                for _ in range(0, num_args - 1) {
-                                    ret.push(Inst(Raw(inst)))
-                                }
+    fn compile_expr(&mut self, code: &'a AST) {
+        match *code {
+            Integer(x) => self.push_raw(asm::LDC(x)),
+            Atom(ref name) => {
+                let new_inst = match self.args.find(&name.as_slice()) {
+                    Some(&num) => asm::LD(0, num),
+                    None => {
+                        match self.globals.find(&name.as_slice()) {
+                            Some(&Const(num)) => asm::LDC(num),
+                            Some(&Fun(ref name)) => {
+                                self.push(asm::NLDF(name.to_string()));
+                                return
                             }
-                            return ret
+                            None => fail!("no such fn or variable '{}'", name.as_slice())
                         }
-                        "sub" => x!(SUB, 2),
-                        "div" => x!(DIV, 2),
-                        "cons" => x!(CONS, 2),
-                        "car" => x!(CAR, 1),
-                        "cdr" => x!(CDR, 1),
-                        "atom" => x!(ATOM, 1),
-                        "brk" => x!(BRK, 0),
-                        "eq" => x!(CEQ, 2),
-                        "ge" => x!(CGTE, 2),
-                        _ => None
-                    };
-                    match inst_args {
-                        Some((inst, count)) => {
-                            assert!(num_args == count,
-                                    "{} expects exactly {} args, but found {}",
-                                    head, count, num_args);
-
-                            ret.push(Inst(Raw(inst)));
-                            return ret
-                        }
-                        None => {/* default */}
                     }
-                }
-                _ => {/* default */}
+                };
+                self.push_raw(new_inst);
             }
-            // compile the function
-            ret.push_all_move(compile_expr(&things[0], args, branch_count, branches, globals));
-            ret.push(Inst(Raw(asm::AP(num_args as u32))));
-            ret
+            Sequence(ref things) => {
+                assert!(!things.is_empty(), "compiling empty sequence");
+
+                let head = &things[0];
+
+                match *head {
+                    Atom(ref name) if name.as_slice() == "if" => {
+                        // (if cond true false)
+                        
+                        // compile and push the cond expr
+                        self.compile_expr(&things[1]);
+
+                        let label_t = self.get_next_label();
+                        let (asm_t, branches_t) =
+                            State::compile_section(&things[2], label_t.clone(), self.args,
+                                                   self.branch_count, self.globals, asm::JOIN);
+                        let label_f = self.get_next_label();
+                        let (asm_f, branches_f) =
+                            State::compile_section(&things[3], label_f.clone(), self.args,
+                                                   self.branch_count, self.globals, asm::JOIN);
+
+                        self.push(asm::NSEL(label_t, label_f));
+
+                        self.branches.push(asm_t);
+                        self.branches.push_all_move(branches_t);
+                        self.branches.push(asm_f);
+                        self.branches.push_all_move(branches_f);
+
+                        return
+                    }
+                    _ => {}
+                }
+
+                // compile everything except the function.
+                for thing in things.tail().iter() {
+                    self.compile_expr(thing)
+                }
+
+                let num_args = things.len() - 1;
+
+                match *head {
+                    Atom(ref head) => {
+                        macro_rules! x {
+                            ($inst: ident, $args: expr) => {
+                                Some((asm::$inst, $args))
+                            }
+                        }
+
+                        let head = head.as_slice();
+                        let inst_args = match head {
+                            // just executes its arguments in sequence,
+                            // which has already happened at this point.
+                            // (do (x y z) (a b c) (d e f))
+                            "do" => {
+                                return
+                            }
+                            "add" | "mul" => {
+                                // (add a b c d ...)
+
+                                let is_mul = head == "mul";
+
+                                if num_args == 0 {
+                                    self.push_raw(asm::LDC(is_mul as i32))
+                                } else {
+                                    let inst = if is_mul {asm::MUL} else {asm::ADD};
+
+                                    for _ in range(0, num_args - 1) {
+                                        self.push_raw(inst)
+                                    }
+                                }
+                                return
+                            }
+                            "sub" => x!(SUB, 2),
+                            "div" => x!(DIV, 2),
+                            "cons" => x!(CONS, 2),
+                            "car" => x!(CAR, 1),
+                            "cdr" => x!(CDR, 1),
+                            "atom" => x!(ATOM, 1),
+                            "brk" => x!(BRK, 0),
+                            "eq" => x!(CEQ, 2),
+                            "ge" => x!(CGTE, 2),
+                            _ => None
+                        };
+                        match inst_args {
+                            Some((inst, count)) => {
+                                assert!(num_args == count,
+                                        "{} expects exactly {} args, but found {}",
+                                        head, count, num_args);
+
+                                self.push_raw(inst);
+                                return
+                            }
+                            None => {/* default */}
+                        }
+                    }
+                    _ => {/* default */}
+                }
+                // compile the function
+                self.compile_expr(&things[0]);
+                self.push_raw(asm::AP(num_args as u32));
+            }
         }
     }
 }
