@@ -6,6 +6,10 @@
 (defun list-nth (list n)
   (car (nth-cell list n)))
 
+; get the (x, y)'th entry of the 2D row-major grid
+(defun 2d-nth (grid x y)
+  (list-nth (list-nth grid y) x))
+
 ; the nth element of a tuple of length n (or, the last one, if n >= length)
 (defun tuple-nth (tup length n)
   (if (>= n length)
