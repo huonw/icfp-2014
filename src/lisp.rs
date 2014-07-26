@@ -337,6 +337,7 @@ impl<'a, 'b> State<'a, 'b> {
                             "cdr" => x!(CDR, 1),
                             "atom" => x!(ATOM, 1),
                             "brk" => x!(BRK, 0),
+                            "dbug" => x!(DBUG, 0),
                             "eq" => x!(CEQ, 2),
                             "ge" => x!(CGTE, 2),
                             _ => None
