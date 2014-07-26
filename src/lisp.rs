@@ -25,6 +25,7 @@ struct FnInfo<'a> {
 
 struct State<'a,'b> {
     // local stuff:
+    fn_name: String,
     branches: Vec<Vec<LabelOrInstruction>>,
     asm: Vec<LabelOrInstruction>,
     env: Rc<Env<'a>>,
@@ -115,7 +116,8 @@ fn top_level_pass<'a>(code: &'a [AST]) -> (HashMap<&'a str, TopLevelValue>, Vec<
         };
 
         match decl.as_slice() {
-            [Atom(ref defun), Atom(ref name), Sequence(ref args), ref body] if defun.as_slice() == "defun" => {
+            [Atom(ref defun), Atom(ref name),
+             Sequence(ref args), ref body] if defun.as_slice() == "defun" => {
                 assert!(globals.insert(name.as_slice(), Fun(name.to_string())),
                         "can't override function named {}", name)
                 let arg_map = args.iter().enumerate().map(|(i, arg)| {
@@ -183,16 +185,21 @@ pub fn compile(code: &AST) -> Vec<LabelOrInstruction> {
 impl<'a, 'b> State<'a, 'b> {
     pub fn compile_fn<'a>(code: &FnInfo<'a>, branch_count: &mut uint,
                           globals: &HashMap<&'a str, TopLevelValue>) -> Vec<LabelOrInstruction> {
-        let (mut asm, branches) = State::compile_section(code.body, code.name.to_string(),
-                                                     code.args.clone(), branch_count, globals, asm::RTN);
+        let (mut asm, branches) =
+            State::compile_section(code.body,
+                                   code.name.to_string(),
+                                   code.name.to_string(),
+                                   code.args.clone(), branch_count, globals, asm::RTN);
         asm.extend(branches.move_iter().flat_map(|branch| branch.move_iter()));
         asm
     }
 
-    fn compile_section(body: &'a AST, name: String, env: Rc<Env<'a>>, branch_count: &mut uint,
-                           globals: &HashMap<&'a str, TopLevelValue>, tail: Instruction)
+    fn compile_section(body: &'a AST, name: String, fn_name: String,
+                       env: Rc<Env<'a>>, branch_count: &mut uint,
+                       globals: &HashMap<&'a str, TopLevelValue>, tail: Instruction)
                            -> (Vec<LabelOrInstruction>, Vec<Vec<LabelOrInstruction>>) {
         let mut state = State {
+            fn_name: fn_name,
             env: env,
             branches: vec![],
             asm: vec![Label(name)],
@@ -206,9 +213,9 @@ impl<'a, 'b> State<'a, 'b> {
         (asm, branches)
     }
 
-    fn get_next_label(&mut self) -> String {
+    fn get_next_label(&mut self, sort: &str) -> String {
         *self.branch_count += 1;
-        format!("branch-{}", *self.branch_count)
+        format!("{}-{}-{}", self.fn_name, sort, *self.branch_count)
     }
 
     fn push_raw(&mut self, inst: Instruction) {
@@ -251,13 +258,17 @@ impl<'a, 'b> State<'a, 'b> {
                         // compile and push the cond expr
                         self.compile_expr(&things[1]);
 
-                        let label_t = self.get_next_label();
+                        let label_t = self.get_next_label("branch");
                         let (asm_t, branches_t) =
-                            State::compile_section(&things[2], label_t.clone(), self.env.clone(),
+                            State::compile_section(&things[2], label_t.clone(),
+                                                   self.fn_name.clone(),
+                                                   self.env.clone(),
                                                    self.branch_count, self.globals, asm::JOIN);
-                        let label_f = self.get_next_label();
+                        let label_f = self.get_next_label("branch");
                         let (asm_f, branches_f) =
-                            State::compile_section(&things[3], label_f.clone(), self.env.clone(),
+                            State::compile_section(&things[3], label_f.clone(),
+                                                   self.fn_name.clone(),
+                                                   self.env.clone(),
                                                    self.branch_count, self.globals, asm::JOIN);
 
                         self.push(asm::NSEL(label_t, label_f));
@@ -287,7 +298,7 @@ impl<'a, 'b> State<'a, 'b> {
                             assert!(new_frame.insert(name, i as u32),
                                     "let with duplicated name {}", name)
                         }
-                        let let_label = self.get_next_label();
+                        let let_label = self.get_next_label("let");
                         self.push_raw(asm::DUM(pairs.len() as u32));
                         self.push(asm::NLDF(let_label.clone()));
                         self.push_raw(asm::RAP(pairs.len() as u32));
@@ -298,7 +309,9 @@ impl<'a, 'b> State<'a, 'b> {
                         });
 
                         let (let_asm, let_branches) =
-                            State::compile_section(&things[2], let_label, env,
+                            State::compile_section(&things[2], let_label,
+                                                   self.fn_name.clone(),
+                                                   env,
                                                    self.branch_count, self.globals, asm::RTN);
                         self.branches.push(let_asm);
                         self.branches.push_all_move(let_branches);
