@@ -158,18 +158,40 @@ pub fn compile(queue: &[LabelOrInstruction]) -> Vec<Instruction> {
 
     ret
 }
+pub fn print_inst(inst: &Instruction) -> String {
+    match *inst {
+        LDC(x) => format!("LDC {}", x),
+        LDF(x) => format!("LDF {}", x),
+        AP(x) => format!("AP {}", x),
+        SEL(x, y) => format!("SEL {} {}", x, y),
+        _ => inst.to_string(),
+    }
+}
 pub fn print(code: &[Instruction]) -> String {
     let mut ret = String::new();
 
     for inst in code.iter() {
-        let val = match *inst {
-            LDC(x) => format!("LDC {}", x),
-            LDF(x) => format!("LDF {}", x),
-            AP(x) => format!("AP {}", x),
-            _ => inst.to_string(),
-        };
-        ret.push_str(val.as_slice());
+        ret.push_str(print_inst(inst).as_slice());
         ret.push_str("\n");
+    }
+    ret
+}
+
+pub fn print_label_or_inst(lab_or_inst: &LabelOrInstruction) -> String {
+    match *lab_or_inst {
+        Label(ref l) => format!("{}:", *l),
+        Inst(NSEL(ref x, ref y)) => format!("SEL {} {}", *x, *y),
+        Inst(NTSEL(ref x, ref y)) => format!("TSEL {} {}", *x, *y),
+        Inst(NLDF(ref x)) => format!("LDF {}", *x),
+        Inst(Raw(inst)) => print_inst(&inst)
+    }
+}
+pub fn print_labelled(code: &[LabelOrInstruction]) -> String {
+    let mut ret = String::new();
+
+    for lab_or_inst in code.iter() {
+        ret.push_str(print_label_or_inst(lab_or_inst).as_slice());
+        ret.push_str("\n")
     }
     ret
 }
