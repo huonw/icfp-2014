@@ -2,7 +2,7 @@
 (defun main ()
   (cons UP step))
 
-; walk in each of the three directions.
+; walk in each of the four directions, cyclically, with no checking.
 (defun step (state world)
   (if
       (eq state LEFT)
