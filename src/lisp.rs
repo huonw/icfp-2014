@@ -4,15 +4,21 @@ use asm::{mod, LabelOrInstruction, Label, Inst, Raw};
 use std::collections::HashMap;
 
 #[deriving(Show, Eq, PartialEq)]
-pub enum AST {
+enum AST {
     Atom(String),
     Integer(i32),
     Sequence(Vec<AST>)
 }
 
-pub enum TopLevelValue {
+enum TopLevelValue {
     Const(i32),
     Fun(String)
+}
+
+struct FnInfo<'a> {
+    name: &'a str,
+    args: HashMap<&'a str, u32>,
+    body: &'a AST
 }
 
 pub fn parse(code: &str) -> AST {
@@ -61,53 +67,68 @@ add/mul/...
 */
 pub fn compile(code: &AST) -> Vec<LabelOrInstruction> {
     let fns = match *code {
-        Atom(_) | Integer(_) => fail!("bare literal at the top level"),
+        Atom(_) | Integer(_) => fail!("bare literal supplied"),
         Sequence(ref fns) => fns,
     };
-    let mut globals = HashMap::new();
+    let (globals, fns) = top_level_pass(fns.as_slice());
     let mut branch_count = 0;
 
     let mut ret = vec![];
     for func in fns.iter() {
-        ret.push_all_move(compile_top_level(func, &mut branch_count, &mut globals))
+        ret.push_all_move(compile_top_level(func, &mut branch_count, &globals))
     }
 
     ret
 }
 
-pub fn compile_top_level<'a>(code: &'a AST, branch_count: &mut uint,
-                             globals: &mut HashMap<&'a str, TopLevelValue>) -> Vec<LabelOrInstruction> {
-    let parts = match *code {
-        Atom(_) | Integer(_) => fail!("bare literal when function expected"),
-        Sequence(ref parts) => parts,
-    };
-    let mut ret = vec![];
+fn top_level_pass<'a>(code: &'a [AST]) -> (HashMap<&'a str, TopLevelValue>, Vec<FnInfo<'a>>) {
+    let mut globals = HashMap::new();
+    let mut fns = vec![];
 
-    // defun <name> (...) <stuff>
-    match parts.as_slice() {
-        [Atom(ref defun), Atom(ref name), Sequence(ref args), ref result] if defun.as_slice() == "defun" => {
-            let arg_map = args.iter().enumerate().map(|(i, arg)| {
-                match *arg {
-                    Atom(ref s) => (s.as_slice(), i as u32),
-                    _ => fail!("invalid argument name: {}", *arg),
-                }
-            }).collect();
+    for decl in code.iter() {
+        // defun <name> (...) <stuff>
+        let decl = match *decl {
+            Atom(_) | Integer(_) => fail!("bare literal at the top level"),
+            Sequence(ref decl) => decl,
+        };
 
-            ret.push(Label(name.to_string()));
+        match decl.as_slice() {
+            [Atom(ref defun), Atom(ref name), Sequence(ref args), ref body] if defun.as_slice() == "defun" => {
+                assert!(globals.insert(name.as_slice(), Fun(name.to_string())),
+                        "can't override function named {}", name)
+                let arg_map = args.iter().enumerate().map(|(i, arg)| {
+                    match *arg {
+                        Atom(ref s) => (s.as_slice(), i as u32),
+                        _ => fail!("invalid argument name: {}", *arg),
+                    }
+                }).collect();
 
-            let mut branches = vec![];
-            ret.push_all_move(compile_expr(result, &arg_map, branch_count, &mut branches, globals));
-            ret.push(Inst(Raw(asm::RTN)));
-
-            ret.extend(branches.move_iter().flat_map(|branch| branch.move_iter()));
+                fns.push(FnInfo {
+                    name: name.as_slice(),
+                    args: arg_map,
+                    body: body
+                });
+            }
+            [Atom(ref cnst), Atom(ref name), Integer(x)] if cnst.as_slice() == "const" => {
+                assert!(globals.insert(name.as_slice(), Const(x)),
+                        "can't override global {} with value {}", name, x)
+            }
+            _ => fail!("invalid top level declaration: {}", decl)
         }
-        [Atom(ref cnst), Atom(ref name), Integer(x)] if cnst.as_slice() == "const" => {
-            assert!(globals.insert(name.as_slice(), Const(x)),
-                    "can't override global {} with value {}", name, x)
-        }
-        _ => fail!("invalid function declaration: {}", parts)
     }
 
+    (globals, fns)
+}
+
+fn compile_top_level<'a>(code: &FnInfo<'a>, branch_count: &mut uint,
+                             globals: &HashMap<&'a str, TopLevelValue>) -> Vec<LabelOrInstruction> {
+    let mut ret = vec![];
+    ret.push(Label(code.name.to_string()));
+    let mut branches = vec![];
+    ret.push_all_move(compile_expr(code.body, &code.args, branch_count, &mut branches, globals));
+    ret.push(Inst(Raw(asm::RTN)));
+
+    ret.extend(branches.move_iter().flat_map(|branch| branch.move_iter()));
     ret
 }
 

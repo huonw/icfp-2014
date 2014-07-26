@@ -13,9 +13,9 @@ fn main() {
     //let x = asm::parse(string.as_slice());
     //println!("{}", asm::compile(x.as_slice()));
     let code = lisp::parse(string.as_slice());
-    println!("parsed: {}", code);
+    //println!("parsed: {}", code);
     let compiled = lisp::compile(&code);
-    println!("labelled: {}", asm::print_labelled(compiled.as_slice()));
+    //println!("labelled: {}", asm::print_labelled(compiled.as_slice()));
     let asm = asm::compile(compiled.as_slice());
     print!("{}", asm::print(asm.as_slice()));
 }
