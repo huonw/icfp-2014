@@ -264,6 +264,7 @@ impl<'a, 'b> State<'a, 'b> {
 
                 match *head {
                     Atom(ref name) if name.as_slice() == "if" => {
+                        assert!(num_args == 3, "if needs 3 things, got {}", num_args);
                         // (if cond true false)
 
                         // compile and push the cond expr
