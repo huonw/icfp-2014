@@ -33,6 +33,7 @@ struct State<'a,'b> {
     globals: &'b HashMap<&'a str, TopLevelValue>
 }
 
+#[deriving(Show)]
 struct Env<'a> {
     here: HashMap<&'a str, u32>,
     parent: Option<Rc<Env<'a>>>
@@ -174,11 +175,11 @@ impl<'a, 'b> State<'a, 'b> {
         asm
     }
 
-    fn compile_section(body: &'a AST, name: String, args: Rc<Env<'a>>, branch_count: &mut uint,
+    fn compile_section(body: &'a AST, name: String, env: Rc<Env<'a>>, branch_count: &mut uint,
                            globals: &HashMap<&'a str, TopLevelValue>, tail: Instruction)
                            -> (Vec<LabelOrInstruction>, Vec<Vec<LabelOrInstruction>>) {
         let mut state = State {
-            env: args,
+            env: env,
             branches: vec![],
             asm: vec![Label(name)],
             branch_count: branch_count,
@@ -226,12 +227,13 @@ impl<'a, 'b> State<'a, 'b> {
             Sequence(ref things) => {
                 assert!(!things.is_empty(), "compiling empty sequence");
 
+                let num_args = things.len() - 1;
                 let head = &things[0];
 
                 match *head {
                     Atom(ref name) if name.as_slice() == "if" => {
                         // (if cond true false)
-                        
+
                         // compile and push the cond expr
                         self.compile_expr(&things[1]);
 
@@ -253,6 +255,41 @@ impl<'a, 'b> State<'a, 'b> {
 
                         return
                     }
+                    Atom(ref name) if name.as_slice() == "let" => {
+                        // (let ((name expression) ...) value)
+                        assert!(num_args == 2, "let needs two things, got {}", num_args);
+
+                        let pairs = match things[1] {
+                            Sequence(ref pairs) => {
+                                pairs.iter().map(extract_let_pair).collect::<Vec<(&str, &AST)>>()
+                            }
+                            _ => fail!("let needs pairs, found {}", things[1])
+                        };
+
+                        let mut new_frame = HashMap::new();
+                        for (i, &(name, body)) in pairs.iter().enumerate() {
+                            // evaluate each argument, placing it on the stack
+                            self.compile_expr(body);
+                            assert!(new_frame.insert(name, i as u32),
+                                    "let with duplicated name {}", name)
+                        }
+                        let let_label = self.get_next_label();
+                        self.push_raw(asm::DUM(pairs.len() as u32));
+                        self.push(asm::NLDF(let_label.clone()));
+                        self.push_raw(asm::RAP(pairs.len() as u32));
+
+                        let env = Rc::new(Env {
+                            here: new_frame,
+                            parent: Some(self.env.clone())
+                        });
+
+                        let (let_asm, let_branches) =
+                            State::compile_section(&things[2], let_label, env,
+                                                   self.branch_count, self.globals, asm::RTN);
+                        self.branches.push(let_asm);
+                        self.branches.push_all_move(let_branches);
+                        return
+                    }
                     _ => {}
                 }
 
@@ -260,8 +297,6 @@ impl<'a, 'b> State<'a, 'b> {
                 for thing in things.tail().iter() {
                     self.compile_expr(thing)
                 }
-
-                let num_args = things.len() - 1;
 
                 match *head {
                     Atom(ref head) => {
@@ -325,5 +360,21 @@ impl<'a, 'b> State<'a, 'b> {
                 self.push_raw(asm::AP(num_args as u32));
             }
         }
+    }
+}
+
+fn extract_let_pair<'a>(p: &'a AST) -> (&'a str, &'a AST) {
+    match *p {
+        Sequence(ref name_expr) => {
+            match name_expr.as_slice() {
+                [Atom(ref name), ref result] => {
+                    (name.as_slice(), result)
+                }
+                _ => {
+                    fail!("`let` needs name-expression pair, found {}", p)
+                }
+            }
+        }
+        _ => fail!("`let` needs pair, found {}", p)
     }
 }
