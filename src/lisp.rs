@@ -146,7 +146,7 @@ pub fn compile_expr<'a>(code: &'a AST, args: &HashMap<&'a str, u32>,
                     match globals.find(&name.as_slice()) {
                         Some(&Const(num)) => vec![Inst(Raw(asm::LDC(num)))],
                         Some(&Fun(ref name)) => vec![Inst(asm::NLDF(name.to_string()))],
-                        None => vec![Inst(asm::NLDF(name.to_string()))],
+                        None => fail!("no such fn or variable '{}'", name)
                     }
                 }
             }
