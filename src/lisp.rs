@@ -1,4 +1,5 @@
 use std::io::File;
+use std::rc::Rc;
 use regex::{Regex, Captures};
 
 use asm::{mod, LabelOrInstruction, Instruction, NamedInstruction, Label, Inst, Raw};
@@ -18,18 +19,41 @@ enum TopLevelValue {
 
 struct FnInfo<'a> {
     name: &'a str,
-    args: HashMap<&'a str, u32>,
+    args: Rc<Env<'a>>,
     body: &'a AST
 }
 
 struct State<'a,'b> {
     // local stuff:
-    args: &'b HashMap<&'a str, u32>,
     branches: Vec<Vec<LabelOrInstruction>>,
     asm: Vec<LabelOrInstruction>,
+    env: Rc<Env<'a>>,
     // global stuff:
     branch_count: &'b mut uint,
     globals: &'b HashMap<&'a str, TopLevelValue>
+}
+
+struct Env<'a> {
+    here: HashMap<&'a str, u32>,
+    parent: Option<Rc<Env<'a>>>
+}
+
+impl<'a> Env<'a> {
+    fn find(&self, name: &'a str) -> Option<(u32, u32)> {
+        let mut this = self;
+        let mut level = 0;
+        loop {
+            match this.here.find(&name) {
+                Some(&num) => return Some((level, num)),
+                None => { }
+            }
+            match this.parent {
+                Some(ref parent) => { this = &**parent }
+                None => return None
+            }
+            level += 1;
+        }
+    }
 }
 
 pub fn parse(code: &str) -> AST {
@@ -102,7 +126,7 @@ fn top_level_pass<'a>(code: &'a [AST]) -> (HashMap<&'a str, TopLevelValue>, Vec<
 
                 fns.push(FnInfo {
                     name: name.as_slice(),
-                    args: arg_map,
+                    args: Rc::new(Env { here: arg_map, parent: None }),
                     body: body
                 });
             }
@@ -145,16 +169,16 @@ impl<'a, 'b> State<'a, 'b> {
     pub fn compile_fn<'a>(code: &FnInfo<'a>, branch_count: &mut uint,
                           globals: &HashMap<&'a str, TopLevelValue>) -> Vec<LabelOrInstruction> {
         let (mut asm, branches) = State::compile_section(code.body, code.name.to_string(),
-                                                     &code.args, branch_count, globals, asm::RTN);
+                                                     code.args.clone(), branch_count, globals, asm::RTN);
         asm.extend(branches.move_iter().flat_map(|branch| branch.move_iter()));
         asm
     }
 
-    fn compile_section(body: &'a AST, name: String, args: &HashMap<&'a str, u32>, branch_count: &mut uint,
+    fn compile_section(body: &'a AST, name: String, args: Rc<Env<'a>>, branch_count: &mut uint,
                            globals: &HashMap<&'a str, TopLevelValue>, tail: Instruction)
                            -> (Vec<LabelOrInstruction>, Vec<Vec<LabelOrInstruction>>) {
         let mut state = State {
-            args: args,
+            env: args,
             branches: vec![],
             asm: vec![Label(name)],
             branch_count: branch_count,
@@ -184,8 +208,8 @@ impl<'a, 'b> State<'a, 'b> {
         match *code {
             Integer(x) => self.push_raw(asm::LDC(x)),
             Atom(ref name) => {
-                let new_inst = match self.args.find(&name.as_slice()) {
-                    Some(&num) => asm::LD(0, num),
+                let new_inst = match self.env.find(name.as_slice()) {
+                    Some((level, address)) => asm::LD(level, address),
                     None => {
                         match self.globals.find(&name.as_slice()) {
                             Some(&Const(num)) => asm::LDC(num),
@@ -213,11 +237,11 @@ impl<'a, 'b> State<'a, 'b> {
 
                         let label_t = self.get_next_label();
                         let (asm_t, branches_t) =
-                            State::compile_section(&things[2], label_t.clone(), self.args,
+                            State::compile_section(&things[2], label_t.clone(), self.env.clone(),
                                                    self.branch_count, self.globals, asm::JOIN);
                         let label_f = self.get_next_label();
                         let (asm_f, branches_f) =
-                            State::compile_section(&things[3], label_f.clone(), self.args,
+                            State::compile_section(&things[3], label_f.clone(), self.env.clone(),
                                                    self.branch_count, self.globals, asm::JOIN);
 
                         self.push(asm::NSEL(label_t, label_f));
