@@ -155,7 +155,21 @@ pub fn compile(code: &AST) -> Vec<LabelOrInstruction> {
         Atom(_) | Integer(_) => fail!("bare literal supplied"),
         Sequence(ref fns) => fns,
     };
-    let (globals, fns) = top_level_pass(fns.as_slice());
+    let (globals, mut fns) = top_level_pass(fns.as_slice());
+
+    // move `main` to be the first.
+    match fns.iter().position(|f| f.name == "main") {
+        Some(i) => {
+            if i != 0 {
+                let main = fns.remove(i).unwrap();
+                fns.insert(0, main);
+            }
+        }
+        None => {
+            fail!("missing `main` function")
+        }
+    }
+
     let mut branch_count = 0;
 
     let mut asm = vec![];
