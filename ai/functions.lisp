@@ -18,53 +18,55 @@
     ; a tuple index is the same as an list index except for the last one
    (list-nth tup n)))
 
+; list of n copies of element
+(defun make-list (n element)
+  (if n (cons element (make-list (- n 1) element)) 0))
+
 ; length of list
 (defun length (list) (if (atom list) 0 (+ 1 (length (cdr list)))))
 
-(defun foldl (f args z list)
+(defun foldl (f z list)
   (if (atom list)
       z
-    (foldl f args (f args z (car list)) (cdr list))))
-(defun foldr (f args z list)
+    (foldl f (f z (car list)) (cdr list))))
+(defun foldr (f z list)
   (if (atom list)
       z
-    (f args (car list) (foldr f args z (cdr list)))))
+    (f (car list) (foldr f z (cdr list)))))
 
 ; create a new list by applying f to each element of list
 ;
 ; (passing args to each f invocation)
-(defun map (f args list)
+(defun map (f list)
   (if
       (atom list)
       0
-      (cons (f args (car list)) (map f args (cdr list)))))
+      (cons (f (car list)) (map f (cdr list)))))
 
 ; create a new list applying f to each element of list
 ;
 ; (passes args and the index i to each invocation)
-(defun mapi (f args list) (__mapi f args list 0))
+(defun mapi (f list) (__mapi f  list 0))
 
-(defun __mapi (f args list i)
+(defun __mapi (f list i)
   (if
       (atom list)
       0
-      (cons (f args (car list) i) (__mapi f args (cdr list) (+ i 1)))))
+      (cons (f (car list) i) (__mapi f (cdr list) (+ i 1)))))
 
 ; find the first element of list for which f is true returning (index,
 ; (element, f element)), or 0 if it is not found.
-;
-; (f is called with args)
-(defun find (f args list)
-  (__find f args list 0))
+(defun find (f list)
+  (__find f list 0))
 
-(defun __find (f args list i)
+(defun __find (f list i)
   (if (atom list)
       0
     (let ((head (car list)))
-      (let ((result (f args head)))
+      (let ((result (f head)))
         (if result
             (cons i (cons head result))
-          (__find f args (cdr list) (+ i 1)))))))
+          (__find f (cdr list) (+ i 1)))))))
 
 (defun point-not-in-list (point point-list)
   (atom (find point-equals point point-list)))
