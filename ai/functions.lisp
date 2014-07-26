@@ -92,5 +92,8 @@
 (defun and (x y) (if x y 0))
 (defun not (x) (if x 0 1))
 
+(defun abs (x)
+  (if (>= x 0) x (- 0 x)))
+
 ; place x onto the stack twice
 (defun dup (x) (do x x))
