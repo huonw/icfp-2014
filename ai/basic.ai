@@ -1,0 +1,8 @@
+(defun main ()
+  (cons 0 step))
+
+(defun step (state world)
+  (if
+      (eq state 3)
+      (cons 0 state)
+    (const (add state 1) state)))

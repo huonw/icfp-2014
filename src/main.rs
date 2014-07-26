@@ -1,4 +1,7 @@
-#![feature(macro_rules)]
+#![feature(macro_rules, phase)]
+
+extern crate regex;
+#[phase(plugin)] extern crate regex_macros;
 
 use std::io;
 

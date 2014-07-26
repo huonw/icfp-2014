@@ -1,6 +1,7 @@
+use regex::{Regex, Captures};
+
 use asm::{mod, LabelOrInstruction, Label, Inst, Raw};
 use std::collections::HashMap;
-
 
 #[deriving(Show, Eq, PartialEq)]
 pub enum AST {
@@ -15,7 +16,13 @@ pub enum TopLevelValue {
 }
 
 pub fn parse(code: &str) -> AST {
-    let code = code.replace("(", " ( ").replace(")", " ) ");
+    static REPLACE: Regex = regex!("[()]|;.*");
+    let code = REPLACE.replace_all(code, |captures: &Captures| {
+        match captures.at(0) {
+            p @ "(" | p @ ")" => format!(" {} ", p),
+            _comment => "".to_string()
+        }
+    });
 
     let mut stack = vec![];
     let mut curr = vec![];
