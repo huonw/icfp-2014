@@ -3,7 +3,7 @@
 (include "consts.lisp")
 (include "functions.lisp")
 
-(defun main ()
+(defun main (world undefined)
   (cons 0 step))
 
 (defun step (state world)

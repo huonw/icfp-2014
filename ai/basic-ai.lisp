@@ -1,5 +1,5 @@
 (include "consts.lisp")
-(defun main ()
+(defun main (world undefined)
   (cons UP step))
 
 ; walk in each of the four directions, cyclically, with no checking.
