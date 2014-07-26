@@ -18,7 +18,7 @@ enum TopLevelValue {
 }
 
 struct FnInfo<'a> {
-    name: &'a str,
+    name: String,
     args: Rc<Env<'a>>,
     body: &'a [AST]
 }
@@ -103,6 +103,26 @@ pub fn parse(code: &str) -> AST {
     Sequence(curr)
 }
 
+fn parse_fn_decl<'a>(name: String, args: &'a AST, body: &'a [AST],
+                     parent: Option<Rc<Env<'a>>>) -> FnInfo<'a> {
+    let args = match *args {
+        Sequence(ref args) => args,
+        _ => fail!("function declaration `{}` requires arguments as a sequence")
+    };
+
+    let arg_map = args.iter().enumerate().map(|(i, arg)| {
+        match *arg {
+            Atom(ref s) => (s.as_slice(), i as u32),
+            _ => fail!("invalid argument name: {}", *arg),
+        }
+    }).collect();
+
+    FnInfo {
+        name: name,
+        args: Rc::new(Env { here: arg_map, parent: parent }),
+        body: body
+    }
+}
 
 fn top_level_pass<'a>(code: &'a [AST]) -> (HashMap<&'a str, TopLevelValue>, Vec<FnInfo<'a>>) {
     let mut globals = HashMap::new();
@@ -117,22 +137,11 @@ fn top_level_pass<'a>(code: &'a [AST]) -> (HashMap<&'a str, TopLevelValue>, Vec<
 
         match decl.as_slice() {
             [Atom(ref defun), Atom(ref name),
-             Sequence(ref args),
+             ref args,
              .. body] if defun.as_slice() == "defun" => {
                 assert!(globals.insert(name.as_slice(), Fun(name.to_string())),
-                        "can't override function named {}", name)
-                let arg_map = args.iter().enumerate().map(|(i, arg)| {
-                    match *arg {
-                        Atom(ref s) => (s.as_slice(), i as u32),
-                        _ => fail!("invalid argument name: {}", *arg),
-                    }
-                }).collect();
-
-                fns.push(FnInfo {
-                    name: name.as_slice(),
-                    args: Rc::new(Env { here: arg_map, parent: None }),
-                    body: body
-                });
+                        "can't override function named {}", name);
+                fns.push(parse_fn_decl(name.to_string(), args, body, None));
             }
             [Atom(ref cnst), Atom(ref name), Integer(x)] if cnst.as_slice() == "const" => {
                 assert!(globals.insert(name.as_slice(), Const(x)),
@@ -161,7 +170,7 @@ pub fn compile(code: &AST) -> Vec<LabelOrInstruction> {
     let (globals, mut fns) = top_level_pass(fns.as_slice());
 
     // move `main` to be the first.
-    match fns.iter().position(|f| f.name == "main") {
+    match fns.iter().position(|f| f.name.as_slice() == "main") {
         Some(i) => {
             if i != 0 {
                 let main = fns.remove(i).unwrap();
@@ -338,6 +347,18 @@ impl<'a, 'b> State<'a, 'b> {
                                                    self.branch_count, self.globals, asm::RTN);
                         self.branches.push(let_asm);
                         self.branches.push_all_move(let_branches);
+                        return
+                    }
+                    Atom(ref name) if name.as_slice() == "lambda" => {
+                        // (lambda (x y...) value...)
+                        assert!(num_args >= 2, "lambda needs two things, got {}", num_args);
+
+                        let name = self.get_next_label("lambda");
+                        let fninfo = parse_fn_decl(name.clone(), &things[1], things.slice_from(2),
+                                                   Some(self.env.clone()));
+                        let compiled = State::compile_fn(&fninfo, self.branch_count, self.globals);
+                        self.branches.push(compiled);
+                        self.push(asm::NLDF(name));
                         return
                     }
                     _ => {}
