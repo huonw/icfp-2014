@@ -361,7 +361,7 @@ impl<'a, 'b> State<'a, 'b> {
                             // just executes its arguments in sequence,
                             // which has already happened at this point.
                             // (do (x y z) (a b c) (d e f))
-                            "do" => {
+                            "do" | "pass" => {
                                 return
                             }
                             "+" | "*" => {
