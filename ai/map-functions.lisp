@@ -1,6 +1,44 @@
 (include "consts.lisp")
 (include "functions.lisp")
 
+(defun pills (world)
+  (__pills-inner (car world) (cdr world) 0 0)
+)
+
+(defun __pills-inner (row future_rows x y)
+  (if (atom row)
+    (if (atom future_rows) 0 (__pills-inner (car future_rows) (cdr future_rows) 0 (+ y 1)))
+    (let ((future_pills (__pills-inner (cdr row) future_rows (+ x 1) y)))
+      (if (if (= (car row) PILL) 1 (= (car row) POWER_PILL))
+        (cons (cons x y) future_pills) ; pill
+        future_pills ; not pill
+      )
+    )
+  )
+)
+
+; (defun visit-cell (xy rest_of_row prev_row whole_row rest_of_world world seen)
+(defun main (world ghost-prog)
+  (dbug (pills (car world)))
+  (cons 0 (lambda (state) (cons 0 LEFT)))
+)
+  ;(let ((x 1) (y 1) (trees (build-trees (car world))))
+  ;  (dbug (2d-nth trees x y))
+  ;(set world (car world))
+  ;(let ((tree (visit-cell
+  ;              (cons 1 1) ; xy
+  ;              (cdr (list-nth world 1)) ; rest_of_row
+  ;              (car world) ; prev_row
+  ;              (list-nth world 1) ; whole_row
+  ;              (nth-cell world 2) ; rest_of_world
+  ;              world ; world
+  ;              0 ; seen
+  ;              )))
+  ;  (dbug tree)
+  ;  (cons 0 (lambda (state) (cons 0 LEFT)))
+  ;)
+;)
+
 (defun dbug-trees () (dbug
   (let ((x 2) (y 0))
     (let ((first-row (cons 1 (cons 1 (cons 0 0))))
