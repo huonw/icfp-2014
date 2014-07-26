@@ -280,6 +280,23 @@ impl<'a, 'b> State<'a, 'b> {
 
                         return
                     }
+                    Atom(ref name) if name.as_slice() == "set" => {
+                        assert!(num_args == 2, "set needs two things, got {}", num_args);
+
+                        let name = match things[1] {
+                            Atom(ref name) => name,
+                            ref x => fail!("Expected variable name but got {}", *x)
+                        };
+
+                        match self.env.find(name.as_slice()) {
+                            Some((frame, address)) => {
+                                self.compile_expr(&things[2]);
+                                self.push_raw(asm::ST(frame, address));
+                            }
+                            None => fail!("failed to set local variable {}", name)
+                        }
+                        return
+                    }
                     Atom(ref name) if name.as_slice() == "let" => {
                         // (let ((name expression) ...) value)
                         assert!(num_args == 2, "let needs two things, got {}", num_args);

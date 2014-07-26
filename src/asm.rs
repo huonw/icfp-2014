@@ -168,6 +168,7 @@ pub fn print_inst(inst: &Instruction) -> String {
         LD(x, y) => format!("LD {} {}", x, y),
         DUM(x) => format!("DUM {}", x),
         RAP(x) => format!("RAP {}", x),
+        ST(x, y) => format!("ST {} {}", x, y),
         _ => inst.to_string(),
     }
 }
