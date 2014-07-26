@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 #[deriving(Show)]
 pub enum Instruction {
-    LDC(u32),
+    LDC(i32),
     LD(u32, u32),
     ADD,
     SUB,
@@ -164,6 +164,7 @@ pub fn print_inst(inst: &Instruction) -> String {
         LDF(x) => format!("LDF {}", x),
         AP(x) => format!("AP {}", x),
         SEL(x, y) => format!("SEL {} {}", x, y),
+        LD(x, y) => format!("LD {} {}", x, y),
         _ => inst.to_string(),
     }
 }
