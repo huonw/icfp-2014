@@ -14,6 +14,9 @@
     ; a tuple index is the same as an list index except for the last one
    (list-nth tup n)))
 
+; length of list
+(defun length (list) (if (atom list) 0)(+ 1 (length (cdr list))))
+
 (defun foldl (f args z list)
   (if (atom list)
       z
@@ -30,7 +33,18 @@
   (if
       (atom list)
       0
-      ((f args (car list)) (map f args (cdr list)))))
+      (cons (f args (car list)) (map f args (cdr list)))))
+
+; create a new list applying f to each element of list
+;
+; (passes args and the index i to each invocation)
+(defun mapi (f args list) (__map f args list 0))
+
+(defun __mapi (f args list i)
+  (if
+      (atom list)
+      0
+      (cons (f args (car list) i) (__mapi f args (cdr list) (+ i 1)))))
 
 ; find the first element of list for which f is true returning (index,
 ; (element, f element)), or 0 if it is not found.
