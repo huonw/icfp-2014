@@ -16,7 +16,7 @@
         (ghost-info (tuple-nth world 4 2)))
 
     (let ((player-pos (car (cdr player)))
-          (ghosts (map (lambda (x) (tuple-nth x 3 1)) ghost-info)))
+          (ghosts (generate-ghost-pos ghost-info)))
 
       (let ((player-x (car player-pos))
             (player-y (cdr player-pos)))
@@ -47,36 +47,89 @@
                                                                        last-visited
                                                                        ghosts)))))
                         (if (atom maybe-new)
-                            ; none of the them, so find the point
-                            ; we've visited the least recently
-                            (let ((point
-                                   (car
-                                    (cdr
-                                     ; the points are ordered from
-                                     ; least to most recent, so find
-                                     ; shortcircuiting on the first
-                                     ; one is perfect
-                                     (find
-                                      (lambda (xy)
-                                        (let ((x (car xy)) (y (cdr xy)))
-                                        ; check if this point is next to us.
-                                          (or (and (= x player-x)
-                                                (= 1 (abs (- y player-y))))
-                                             (and (= 1 (abs (- x player-x)))
-                                                (= y player-y)))))
-                                      last-visited)))))
-                              (cons
-                               (let ((point-x (car point)) (point-y (cdr point)))
-                                 (if (> point-x player-x) RIGHT
-                                   (if (> player-x point-x) LEFT
-                                     (if (> point-y player-y) DOWN
-                                       UP))))
-                               point))
+                          ; no unvisited cell not occupied by ghosts
+                          (let
+                              ; check for open squares (hopefully avoiding ghosts)
+                              ((maybe-no-ghost
+                                (check-surrounds world-map player-row
+                                                 player-x player-y
+                                                 (lambda (value x y)
+                                                   (check-and-not-old-or-ghost not-a-wall
+                                                                           value x y
+                                                                           0
+                                                                           ghosts)))))
+                           (if (atom maybe-no-ghost)
+                              ; none of the them, so find the point
+                              ; we've visited the least recently
+                              (let ((point
+                                     (car
+                                      (cdr
+                                       ; the points are ordered from
+                                       ; least to most recent, so find
+                                       ; shortcircuiting on the first
+                                       ; one is perfect
+                                       (find
+                                        (lambda (xy)
+                                          (let ((x (car xy)) (y (cdr xy)))
+                                          ; check if this point is next to us.
+                                            (or (and (= x player-x)
+                                                  (= 1 (abs (- y player-y))))
+                                               (and (= 1 (abs (- x player-x)))
+                                                  (= y player-y)))))
+                                        last-visited)))))
+                                (dbug 101910912)
+                                (dbug player-pos)
+                                (cons
+                                 (let ((point-x (car point)) (point-y (cdr point)))
+                                   (if (> point-x player-x) RIGHT
+                                     (if (> player-x point-x) LEFT
+                                       (if (> point-y player-y) DOWN
+                                         UP))))
+                                 point))
+                             maybe-no-ghost))
                           maybe-new))
                     maybe-pill))))
             (cons
              (cons (+ tick 1) (push-back (cdr last-visited) (cdr move)))
              (car move))))))))
+
+(defun generate-ghost-pos (ghost-info)
+  (if (atom ghost-info) 0
+    (let ((ghost (car ghost-info)))
+      (let ((ghost-pos (car (cdr ghost))))
+        (let ((x (car ghost-pos)) (y (cdr ghost-pos)))
+          (cons ghost-pos
+            (cons (cons (+ x 1) y)
+            (cons (cons (- x 1) y)
+            (cons (cons x (+ y 1))
+            (cons (cons x (- y 1))
+            (cons (cons (+ x 2) y)
+            (cons (cons (- x 2) y)
+            (cons (cons x (+ y 2))
+            (cons (cons x (- y 2))
+            (cons (cons (+ x 1) (+ y 1))
+            (cons (cons (+ x 1) (- y 1))
+            (cons (cons (- x 1) (+ y 1))
+            (cons (cons (- x 1) (- y 1))
+                (generate-ghost-pos (cdr ghost-info))
+                                  )
+                                )
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
 
 (defun not-a-wall (value)
   (>= value EMPTY))
