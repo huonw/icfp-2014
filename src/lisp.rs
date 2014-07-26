@@ -1,4 +1,4 @@
-use asm::{mod, LabelOrInstruction, Label, Inst, Raw, RTN, LDC, NLDF, AP};
+use asm::{mod, LabelOrInstruction, Label, Inst, Raw};
 use std::collections::HashMap;
 
 
@@ -53,15 +53,17 @@ pub fn compile(code: &AST) -> Vec<LabelOrInstruction> {
         Sequence(ref fns) => fns,
     };
 
+    let mut branch_count = 0;
+
     let mut ret = vec![];
     for func in fns.iter() {
-        ret.push_all_move(compile_fn(func))
+        ret.push_all_move(compile_fn(func, &mut branch_count))
     }
 
     ret
 }
 
-pub fn compile_fn(code: &AST) -> Vec<LabelOrInstruction> {
+pub fn compile_fn(code: &AST, branch_count: &mut uint) -> Vec<LabelOrInstruction> {
     let parts = match *code {
         Atom(_) | Integer(_) => fail!("bare literal when function expected"),
         Sequence(ref parts) => parts,
@@ -79,8 +81,11 @@ pub fn compile_fn(code: &AST) -> Vec<LabelOrInstruction> {
 
             ret.push(Label(name.to_string()));
 
-            ret.push_all_move(compile_expr(result, &arg_map));
-            ret.push(Inst(Raw(RTN)));
+            let mut branches = vec![];
+            ret.push_all_move(compile_expr(result, &arg_map, branch_count, &mut branches));
+            ret.push(Inst(Raw(asm::RTN)));
+
+            ret.extend(branches.move_iter().flat_map(|branch| branch.move_iter()));
         }
         _ => fail!("invalid function declaration: {}", parts)
     }
@@ -89,24 +94,121 @@ pub fn compile_fn(code: &AST) -> Vec<LabelOrInstruction> {
 }
 
 
-pub fn compile_expr<'a>(code: &'a AST, args: &HashMap<&'a str, u32>) -> Vec<LabelOrInstruction> {
+pub fn compile_expr<'a>(code: &'a AST, args: &HashMap<&'a str, u32>,
+                        branch_count: &mut uint,
+                        branches: &mut Vec<Vec<LabelOrInstruction>>) -> Vec<LabelOrInstruction> {
     match *code {
-        Integer(x) => vec![Inst(Raw(LDC(x)))],
+        Integer(x) => vec![Inst(Raw(asm::LDC(x)))],
         Atom(ref name) => {
             match args.find(&name.as_slice()) {
                 Some(_) => fail!(),
                 None => {
-                    vec![Inst(NLDF(name.to_string()))]
+                    vec![Inst(asm::NLDF(name.to_string()))]
                 }
             }
         }
         Sequence(ref things) => {
-            let mut ret = vec![];
-            for thing in things.iter().rev() {
-                ret.push_all_move(compile_expr(thing, args));
-            }
-            ret.push(Inst(Raw(AP(things.len() as u32 - 1))));
+            assert!(!things.is_empty(), "compiling empty sequence");
 
+            let mut ret = vec![];
+
+            let head = &things[0];
+
+            match *head {
+                Atom(ref name) if name.as_slice() == "if" => {
+                    // (if cond true false)
+                    let cond = compile_expr(&things[1], args, branch_count, branches);
+
+                    let label_t = format!("branch-{}", branch_count);
+                    *branch_count += 1;
+                    let mut t = compile_expr(&things[2], args, branch_count, branches);
+
+                    let label_f = format!("branch-{}", branch_count);
+                    *branch_count += 1;
+                    let mut f = compile_expr(&things[3], args, branch_count, branches);
+
+                    ret.push_all_move(cond);
+                    ret.push(Inst(asm::NSEL(label_t.clone(), label_f.clone())));
+
+                    t.insert(0, Label(label_t));
+                    t.push(Inst(Raw(asm::JOIN)));
+
+                    f.insert(0, Label(label_f));
+                    f.push(Inst(Raw(asm::JOIN)));
+
+                    branches.push(t);
+                    branches.push(f);
+
+                    return ret;
+                }
+                _ => {}
+            }
+
+            // compile everything except the function.
+            for thing in things.tail().iter() {
+                ret.push_all_move(compile_expr(thing, args, branch_count, branches))
+            }
+
+            let num_args = things.len() - 1;
+
+            match *head {
+                Atom(ref head) => {
+                    macro_rules! x {
+                        ($inst: ident, $args: expr) => {
+                            Some((asm::$inst, $args))
+                        }
+                    }
+
+                    let head = head.as_slice();
+                    let inst_args = match head {
+                        // just executes its arguments in sequence,
+                        // which has already happened at this point.
+                        // (do (x y z) (a b c) (d e f))
+                        "do" => {
+                            return ret
+                        }
+                        "add" | "mul" => {
+                            // (add a b c d ...)
+
+                            let is_mul = head == "mul";
+
+                            if num_args == 0 {
+                                ret.push(Inst(Raw(asm::LDC(is_mul as u32))))
+                            } else {
+                                let inst = if is_mul {asm::MUL} else {asm::ADD};
+
+                                for _ in range(0, num_args - 1) {
+                                    ret.push(Inst(Raw(inst)))
+                                }
+                            }
+                            return ret
+                        }
+                        "sub" => x!(SUB, 2),
+                        "div" => x!(DIV, 2),
+                        "cons" => x!(CONS, 2),
+                        "car" => x!(CAR, 1),
+                        "cdr" => x!(CDR, 1),
+                        "atom" => x!(ATOM, 1),
+                        "brk" => x!(BRK, 0),
+                        _ => None
+                    };
+                    match inst_args {
+                        Some((inst, count)) => {
+                            assert!(num_args == count,
+                                    "{} expects exactly {} args, but found {}",
+                                    head, count, num_args);
+
+                            ret.push(Inst(Raw(inst)));
+                            return ret
+                        }
+                        None => {/* default */}
+                    }
+                }
+                _ => {/* default */}
+            }
+            // compile the function
+            ret.push_all_move(compile_expr(&things[0], args, branch_count, branches));
+            ret.push(Inst(Raw(asm::AP(num_args as u32))));
             ret
         }
     }
