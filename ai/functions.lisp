@@ -69,12 +69,11 @@
           (__find f (cdr list) (+ i 1)))))))
 
 (defun point-not-in-list (point point-list)
-  (atom (find point-equals point point-list)))
-
-(defun point-equals (a b)
-  (if (= (car a) (car b))
-      (= (cdr a) (cdr b))
-    0))
+  (let ((x (car point))
+        (y (cdr point)))
+    (atom (find
+           (lambda (a) (if (= (car a) x) (= (cdr a) y) 0))
+           point-list))))
 
 ; create a new list with elem on the back
 (defun push-back (list elem)
