@@ -1,6 +1,6 @@
 ; the nth cons cell in a (x (y (z ...))) list
 (defun nth-cell (array n)
-  (if n (nth-cell (cdr array) (sub n 1)) array))
+  (if n (nth-cell (cdr array) (- n 1)) array))
 
 ; the nth element of list (doesn't check for out-of-bounds access)
 (defun list-nth (list n)
@@ -8,9 +8,9 @@
 
 ; the nth element of a tuple of length n (or, the last one, if n >= length)
 (defun tuple-nth (tup length n)
-  (if (ge n length)
+  (if (>= n length)
       ; get the cdr of the last cell
-      (cdr (nth-cell tup (sub n 1)))
+      (cdr (nth-cell tup (- n 1)))
     ; a tuple index is the same as an list index except for the last one
    (list-nth tup n)))
 
@@ -46,7 +46,7 @@
       (let ((result (f args head)))
         (if result
             (cons i (cons head result))
-          (__find f args (cdr list) (add i 1)))))))
+          (__find f args (cdr list) (+ i 1)))))))
 
 ; create a new list with elem on the back
 (defun push-back (list elem)

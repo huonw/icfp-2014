@@ -364,10 +364,10 @@ impl<'a, 'b> State<'a, 'b> {
                             "do" => {
                                 return
                             }
-                            "add" | "mul" => {
+                            "+" | "*" => {
                                 // (add a b c d ...)
 
-                                let is_mul = head == "mul";
+                                let is_mul = head == "*";
 
                                 if num_args == 0 {
                                     self.push_raw(asm::LDC(is_mul as i32))
@@ -380,16 +380,17 @@ impl<'a, 'b> State<'a, 'b> {
                                 }
                                 return
                             }
-                            "sub" => x!(SUB, 2),
-                            "div" => x!(DIV, 2),
+                            "-" => x!(SUB, 2),
+                            "/" => x!(DIV, 2),
                             "cons" => x!(CONS, 2),
                             "car" => x!(CAR, 1),
                             "cdr" => x!(CDR, 1),
                             "atom" => x!(ATOM, 1),
                             "brk" => x!(BRK, 0),
                             "dbug" => x!(DBUG, 0),
-                            "eq" => x!(CEQ, 2),
-                            "ge" => x!(CGTE, 2),
+                            "=" => x!(CEQ, 2),
+                            ">=" => x!(CGTE, 2),
+                            ">" => x!(CGT, 2),
                             _ => None
                         };
                         match inst_args {

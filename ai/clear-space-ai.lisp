@@ -17,11 +17,11 @@
           (cons
            0
            (if
-               (ge (list-nth player-row (add player-x 1)) EMPTY)
+               (>= (list-nth player-row (+ player-x 1)) EMPTY)
                RIGHT
              (if
-                 (ge (list-nth (list-nth map (add player-y 1)) player-x) EMPTY)
+                 (>= (list-nth (list-nth map (+ player-y 1)) player-x) EMPTY)
                  DOWN
-               (if (ge (list-nth player-row (sub player-x 1)) EMPTY)
+               (if (>= (list-nth player-row (- player-x 1)) EMPTY)
                    LEFT
                  UP)))))))))

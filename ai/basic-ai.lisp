@@ -5,6 +5,6 @@
 ; walk in each of the four directions, cyclically, with no checking.
 (defun step (state world)
   (if
-      (eq state LEFT)
+      (= state LEFT)
       (cons 0 state)
-    (cons (add state 1) state)))
+    (cons (+ state 1) state)))
