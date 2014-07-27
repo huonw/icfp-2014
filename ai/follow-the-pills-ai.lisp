@@ -2,31 +2,29 @@
 
 (include "consts.lisp")
 (include "functions.lisp")
-(include "map-functions.lisp")
 
 (defun main (world undefined)
-  (let ((pills (pills world)))
+  (let ((pill-list (pills (car world))))
+    (dbug pill-list)
     (cons
-      (cons 0 (cons pills (make-list 200 (cons 0 0))))
+      (cons 0 (cons pill-list (make-list 200 (cons 0 0))))
       step)))
 
 (defun step (state world)
   (let ((tick (car state))
-        (pills (car (cdr state))
+        (pills (car (cdr state)));(maybe-with-fruit (car (cdr state)) world))
         (last-visited (cdr (cdr state)))
         (player (car (cdr world)))
         (world-map (car world))
         (ghost-info (tuple-nth world 4 2)))
-
-    (let ((player-pos (car (cdr player)))
-          (ghosts (generate-ghost-pos ghost-info)))
-
+    (let ((player-pos (car (cdr player))) (player-dir (tuple-nth player 5 2)))
+          ;(all-ghosts (map pos-gen-fns ghost-info)))
       (let ((player-x (car player-pos))
             (player-y (cdr player-pos)))
         (let ((player-row (list-nth world-map player-y)))
-
-          (let
-              ((move
+          (let ((moves
+            (map (lambda (f)
+              (let ((ghosts (f ghost-info)))
                 (let
                     ; check for nearby pills (hopefully avoiding ghosts)
                     ((maybe-pill
@@ -37,89 +35,83 @@
                                                                      last-visited
                                                                      ghosts)))))
                   (if (atom maybe-pill)
-                      ; no pill nearby
-                      (let
-                          ; check for open squares we haven't visited
-                          ; recently (hopefully avoiding ghosts)
-                          ((maybe-new
-                            (check-surrounds world-map player-row
-                                             player-x player-y
-                                             (lambda (value x y)
-                                               (check-and-not-old-or-ghost not-a-wall
-                                                                       value x y
-                                                                       last-visited
-                                                                       ghosts)))))
-                        (if (atom maybe-new)
-                          ; no unvisited cell not occupied by ghosts
-                          (let
-                              ; check for open squares (hopefully avoiding ghosts)
-                              ((maybe-no-ghost
-                                (check-surrounds world-map player-row
-                                                 player-x player-y
-                                                 (lambda (value x y)
-                                                   (check-and-not-old-or-ghost not-a-wall
-                                                                           value x y
-                                                                           0
-                                                                           ghosts)))))
-                           (if (atom maybe-no-ghost)
-                              ; none of the the ghostless open squares, find distant pill to bear towards
-                              (let ((result (choose-direction-and-update-pills pills player-pos world-map)))
-                                (set pills (cdr result))
-                                (let ((maybe-distant-pill (car result)))
-                                  (if (eq maybe-distant-pill -1)
-                                    ; no pills left seemingly? worrying... anyway find point
-                                    ; we've visited the least recently
-                                    (let ((point
-                                           (car
-                                            (cdr
-                                             ; the points are ordered from
-                                             ; least to most recent, so find
-                                             ; shortcircuiting on the first
-                                             ; one is perfect
-                                             (find
-                                              (lambda (xy)
-                                                (let ((x (car xy)) (y (cdr xy)))
-                                                ; check if this point is next to us.
-                                                  (or (and (= x player-x)
-                                                        (= 1 (abs (- y player-y))))
-                                                     (and (= 1 (abs (- x player-x)))
-                                                        (= y player-y)))))
-                                              last-visited)))))
-                                      (dbug 101910912)
-                                      (dbug player-pos)
-                                      (cons ; TODO: default to choose-direction's choice (and update `pills` in line with what choose-direction says)
-                                       (let ((point-x (car point)) (point-y (cdr point)))
-                                         (if (> point-x player-x) RIGHT
-                                           (if (> player-x point-x) LEFT
-                                             (if (> point-y player-y) DOWN
-                                               UP))))
-                                       point))
-                                    maybe-distant-pill)))
-                             maybe-no-ghost))
-                          maybe-new))
+                      ; no pill nearby, find distant pill to bear towards
+                      (let ((result (choose-direction-and-update-pills pills player-pos player-dir player-row ghosts world-map)))
+                        (set pills (cdr result))
+                        (let ((maybe-distant-pill (car result)))
+                            maybe-distant-pill))
                     maybe-pill))))
-            (cons
-             (cons (+ tick 1) (push-back (cdr last-visited) (cdr move)))
-             (car move)))))))))
+              (cons generate-ghost-pos-2 (cons generate-ghost-pos-1 (cons generate-ghost-pos-0 (cons generate-ghost-pos-none 0)))))
+          ))
+            (let ((move (car (cdr (find (lambda (x) (not (atom x))) moves)))))
+              (cons
+               (cons (+ tick 1) (cons pills (push-back (cdr last-visited) (cdr move))))
+               (car move)))))))))
 
-(defun choose-direction-and-update-pills (pills player-pos map)
+;(defun maybe-with-fruit (pills world)
+;  (let ((fruit-timer (tuple-nth world 4 3)))
+;    (if fruit-timer () (cdr pills))))
+
+(defun pills (world)
+  (__pills-inner (car world) (cdr world) 0 0)
+)
+
+(defun __pills-inner (row future_rows x y)
+  (if (atom row)
+    (if (atom future_rows) 0 (__pills-inner (car future_rows) (cdr future_rows) 0 (+ y 1)))
+    (let ((future_pills (__pills-inner (cdr row) future_rows (+ x 1) y)))
+      (if (if (= (car row) PILL) 1 (= (car row) POWER_PILL))
+        (cons (cons x y) future_pills) ; pill
+        future_pills ; not pill
+      )
+    )
+  )
+)
+
+(defun choose-direction-and-update-pills (pills player-pos dir player-row ghosts map)
   (cons ; big indented expr block returns a direction (-1 for failure)
     (if (atom pills) -1 ; fail: just pick a direction
-      (let (pill (car pills))
-        (set pills (cdr pills)) ; this one is now shotgunned (regardless of whether it remains a pill or not)
+      (let ((pill (car pills)))
         (let ((pill-x (car pill)) (pill-y (cdr pill)))
           (if (pill-or-better (2d-nth map pill-x pill-y)) ; pill still there
             (let ((player-x (car player-pos)) (player-y (cdr player-pos)))
               ; choose direction taking us towards a pill
-              (let ((abs-x (abs (- player-x pill-x))) (abs-y (abs (- player-y pill-y))))
+              (let ((abs-x (abs (- player-x pill-x))) (abs-y (abs (- player-y pill-y)))
+                    (up-gt-down (> player-y pill-y)) (left-gt-right (> player-x pill-x)))
                 (if (>= abs-x abs-y)
-                  (if (>= pill-x player-x) RIGHT LEFT)
-                  (if (>= pill-y player-y) DOWN UP)
+                  ; prefer across rather than vertical
+                  (let ((pref1 (if left-gt-right LEFT RIGHT))
+                        (pref2 (if up-gt-down UP DOWN))
+                        (pref3 (if left-gt-right RIGHT LEFT))
+                        (pref4 (if up-gt-down DOWN UP)))
+                    (check-surrounds-by-pref map player-row
+                                             player-x player-y dir
+                                             pref1 pref2 pref3 pref4
+                                             (lambda (value x y)
+                                               (check-and-not-old-or-ghost not-a-wall
+                                                                       value x y
+                                                                       0
+                                                                       ghosts)))
+                  )
+                  ; else prefer up/down rather than across
+                  (let ((pref1 (if up-gt-down UP DOWN))
+                        (pref2 (if left-gt-right LEFT RIGHT))
+                        (pref3 (if up-gt-down DOWN UP))
+                        (pref4 (if left-gt-right RIGHT LEFT)))
+                    (check-surrounds-by-pref map player-row
+                                             player-x player-y dir
+                                             pref1 pref2 pref3 pref4
+                                             (lambda (value x y)
+                                               (check-and-not-old-or-ghost not-a-wall
+                                                                       value x y
+                                                                       0
+                                                                       ghosts)))
+                  )
                 )
               )
             )
             ; else move onto next pill
-            (let ((result (choose-direction-and-update-pills (cdr pills) player-pos map)))
+            (let ((result (choose-direction-and-update-pills (cdr pills) player-pos dir player-row ghosts map)))
               (set pills (cdr result))
               (car result) ; return the direction chosen by recursive call
             )
@@ -129,8 +121,25 @@
     )
   pills)) ; return (cons direction new-pill-list) pair
 
+(defun find-valid-direction (map x y p1 p2 p3 p4)
+  (let ((xy1 (inc x y p1)))
+    (if (2d-nth map (car xy1) (cdr xy1))
+      p1 ; can go p1
+      (let ((xy2 (inc x y p2)))
+        (if (2d-nth map (car xy2) (cdr xy2))
+        p2 ; can go p2
+        (let ((xy3 (inc x y p3)))
+          (if (2d-nth map (car xy3) (cdr xy3))
+            p3 ; can go p3
+            p4)))))))
 
-(defun generate-ghost-pos (ghost-info)
+(defun inc (x y dir)
+  (if (= dir RIGHT) (cons (+ x 1) y)
+  (if (= dir DOWN) (cons x (+ y 1))
+  (if (= dir LEFT) (cons (- x 1) y)
+  (cons x (- y 1))))))
+
+(defun generate-ghost-pos-2 (ghost-info)
   (if (atom ghost-info) 0
     (let ((ghost (car ghost-info)))
       (let ((ghost-pos (car (cdr ghost))))
@@ -148,7 +157,7 @@
             (cons (cons (+ x 1) (- y 1))
             (cons (cons (- x 1) (+ y 1))
             (cons (cons (- x 1) (- y 1))
-                (generate-ghost-pos (cdr ghost-info))
+                (generate-ghost-pos-2 (cdr ghost-info))
                                   )
                                 )
                               )
@@ -168,8 +177,31 @@
   )
 )
 
-(defun not-a-wall (value)
-  (>= value EMPTY))
+(defun generate-ghost-pos-0 (ghost-info) (map (lambda (ghost) (car (cdr ghost))) ghost-info))
+(defun generate-ghost-pos-none (_) 0)
+(defun generate-ghost-pos-1 (ghost-info)
+  (if (atom ghost-info) 0
+    (let ((ghost (car ghost-info)))
+      (let ((ghost-pos (car (cdr ghost))))
+        (let ((x (car ghost-pos)) (y (cdr ghost-pos)))
+          (cons ghost-pos
+            (cons (cons (+ x 1) y)
+            (cons (cons (- x 1) y)
+            (cons (cons x (+ y 1))
+            (cons (cons x (- y 1))
+                (generate-ghost-pos-1 (cdr ghost-info))
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+(defun not-a-wall (value) (>= value EMPTY))
 
 ; don't count the starting places
 (defun pill-or-better (value)
@@ -183,8 +215,24 @@
           0)
       0)))
 
+(defun opt-get-sq (map player-row py x y)
+  (if (= y py) (list-nth player-row x) (2d-nth map x y))
+)
 ; call `f' on the cell values in each of the directions, returning the
 ; first returns true (or -1 if they're all false)
+(defun check-surrounds-by-pref (map player-row player-x player-y dir p1 p2 p3 p4 f)
+  (if (= p1 -1) 0
+  (let ((xy (inc player-x player-y p1)))
+    (let ((x (car xy)) (y (cdr xy)))
+      (if (and (not (opposed dir p1)) (f (opt-get-sq map player-row player-y x y) x y))
+        (cons p1 xy)
+        (check-surrounds-by-pref map player-row player-x player-y dir p2 p3 p4 -1 f)
+      )
+    )
+  )))
+
+(defun opposed (dir1 dir2) (= (- dir1 dir2) 2))
+
 (defun check-surrounds (map player-row player-x player-y f)
   (let ((x (+ player-x 1)))
     (if (f (list-nth player-row x) x player-y)
