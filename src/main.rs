@@ -8,12 +8,15 @@ extern crate regex;
 use std::{os, io, result};
 
 mod asm;
+mod ghost;
 mod lisp;
 
 
 fn main() {
-    let opts = [getopts::optopt("e", "emit", "what format to print", "bin|asm|ast"),
+    let opts = [getopts::optflag("g", "ghost", "compile a ghost program"),
+                getopts::optopt("e", "emit", "what format to print", "bin|asm|ast"),
                 getopts::optflag("h", "help", "show this help message")];
+
     let args = os::args();
 
     let mut matches = getopts::getopts(args.tail(), opts).unwrap();
@@ -44,19 +47,26 @@ fn main() {
         }
     };
 
-    let code = lisp::parse(input.as_slice());
-
-    match matches.opt_str("emit").unwrap_or(String::new()).as_slice() {
-        "" | "bin" => {
-            print!("{}",
-                   asm::print(asm::compile(lisp::compile(&code).as_slice()).as_slice()));
+    if matches.opt_present("ghost") {
+        let (code, var, consts) = ghost::parse(input.as_slice());
+        for inst in ghost::compile(code.as_slice(), &var, &consts).iter() {
+            println!("{}", *inst)
         }
-        "asm" => {
-            print!("{}",
-                   asm::print_labelled(lisp::compile(&code).as_slice()))
+    } else {
+        let code = lisp::parse(input.as_slice());
 
+        match matches.opt_str("emit").unwrap_or(String::new()).as_slice() {
+            "" | "bin" => {
+                print!("{}",
+                       asm::print(asm::compile(lisp::compile(&code).as_slice()).as_slice()));
+            }
+            "asm" => {
+                print!("{}",
+                       asm::print_labelled(lisp::compile(&code).as_slice()))
+
+            }
+            "ast" => println!("{}", code),
+            _ => fail!("unrecognised `emit`")
         }
-        "ast" => println!("{}", code),
-        _ => fail!("unrecognised `emit`")
     }
 }
