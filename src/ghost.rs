@@ -186,6 +186,7 @@ impl Show for Readable {
     }
 }
 
+#[deriving(Clone)]
 enum Interrupt {
     IntLit(u8),
     IntConstant(Constant)
@@ -205,9 +206,18 @@ impl Show for Interrupt {
     }
 }
 
+#[deriving(Clone)]
 enum PositionOrLabel {
     Pos(u8),
     PosLabel(Label)
+}
+impl PositionOrLabel {
+    fn into_readable(self) -> Readable {
+        match self {
+            Pos(x) => ReConst(x),
+            PosLabel(l) => ReLabel(l)
+        }
+    }
 }
 
 impl FromStr for PositionOrLabel {
@@ -225,6 +235,8 @@ impl Show for PositionOrLabel {
     }
 }
 
+#[deriving(Clone)]
+#[allow(non_camel_case_types)]
 enum Instruction {
     MOV(Writable, Readable),
     INC(Writable),
@@ -241,7 +253,15 @@ enum Instruction {
     JGT(PositionOrLabel, Readable, Readable),
 
     INT(Interrupt),
-    HLT
+    HLT,
+
+    PUSH(Readable),
+    POP(Writable),
+    JUMP(PositionOrLabel),
+    CALL(PositionOrLabel),
+    CALL_RET_TO(PositionOrLabel, PositionOrLabel),
+    RETURN,
+    DEBUG
 }
 
 impl FromStr for Instruction {
@@ -297,7 +317,16 @@ impl FromStr for Instruction {
             "jeq" => JEQ(3),
             "jgt" => JGT(3),
             "int" => INT(1),
-            "hlt" => HLT(0)
+            "hlt" => HLT(0),
+
+            "push" => PUSH(1),
+            "pop" => POP(1),
+            "call" => CALL(1),
+            "call-ret-to" => CALL_RET_TO(2),
+            "jump" => JUMP(1),
+            "return" => RETURN(0),
+            "debug" => DEBUG(0)
+
         })
     }
 }
@@ -323,7 +352,9 @@ impl Show for Instruction {
                 match *self {
                     $($name($(ref $x),+) => show_work!($shown $($x)+),)*
                         // special case because lazy.
-                        HLT => try!("hlt".fmt(f))
+                        HLT => try!("hlt".fmt(f)),
+                    RETURN => try!("return".fmt(f)),
+                    DEBUG => try!("debug".fmt(f))
                 }
             }
         }
@@ -341,15 +372,22 @@ impl Show for Instruction {
             JLT(x,y,z) => "jlt",
             JEQ(x,y,z) => "jeq",
             JGT(x,y,z) => "jgt",
-            INT(x) => "int"
+            INT(x) => "int",
+
+            PUSH(x) => "push",
+            POP(x) => "pop",
+            CALL(x) => "call",
+            CALL_RET_TO(x,y) => "call-ret-to",
+            JUMP(x) => "lab"
         }
         Ok(())
     }
 }
 
+#[deriving(Clone)]
 enum LabelOrInstruction {
     Inst(Instruction),
-    Label(String)
+    Label(Label)
 }
 
 enum BinOp {
@@ -384,7 +422,7 @@ impl FromStr for LabelOrInstruction {
         let mut w = x.words();
         match (w.next(), w.next()) {
             (Some(lab), None) if lab.ends_with(":") => {
-                Some(Label(lab.slice_to(lab.len() - 1).to_string()))
+                Some(Label(Label { name: lab.slice_to(lab.len() - 1).to_string() }))
             }
             _ => from_str(x).map(Inst)
         }
@@ -409,7 +447,7 @@ pub fn parse(code: &str) -> (Vec<LabelOrInstruction>,
 
 
     let mut variables = HashMap::new();
-    let mut variable_index = 255u8;
+    let mut variable_index = 0u8;
 
     let mut constants = HashMap::new();
     let mut parsed = vec![];
@@ -427,7 +465,7 @@ pub fn parse(code: &str) -> (Vec<LabelOrInstruction>,
                 if initial {
                     assert!(variables.insert(var.to_string(), variable_index),
                             "duplicated decl of variable {}: {}", var, line);
-                    variable_index -= 1
+                    variable_index += 1
                 } else {
                     fail!("decls only allowed at the top of a file: {}", line)
                 }
@@ -555,9 +593,17 @@ impl Resolve for Interrupt {
 pub fn compile(code: &[LabelOrInstruction],
                variables: &HashMap<String, u8>, constants: &HashMap<String, u8>)
                -> Vec<Instruction> {
+    // initialise the stack pointer
+    let mut no_sugar = vec![Inst(MOV(WrReg(H), ReConst(255)))];
+    for thing in code.iter() {
+        match *thing {
+            Label(_) => no_sugar.push(thing.clone()),
+            Inst(ref i) => desugar(i.clone(), &mut no_sugar)
+        }
+    }
     let mut labels = HashMap::new();
     let mut index = 0u;
-    for thing in code.iter() {
+    for thing in no_sugar.iter() {
         match *thing {
             Label(ref name) => {
                 assert!(labels.insert(name.to_string(), index as u8),
@@ -567,11 +613,10 @@ pub fn compile(code: &[LabelOrInstruction],
         }
     }
 
-    assert!(index <= 256, "program has {} instructions, limit is 256", index);
     assert!(variables.len() <= 256, "program has {} variables, limit is 256", variables.len());
 
     let mut ret = vec![];
-    for thing in code.iter() {
+    for thing in no_sugar.iter() {
         let inst = match *thing {
             Label(_) => continue,
             Inst(ref inst) => inst
@@ -583,12 +628,14 @@ pub fn compile(code: &[LabelOrInstruction],
                     $($name($(ref $x),+) => {
                         $name($($x.resolve(inst, variables, constants, &labels) ),*)
                     })*
-                      // special case because lazy.
-                      HLT => HLT
+                        // special case because lazy.
+                        HLT => HLT,
+                    RETURN => RETURN,
+                    DEBUG => DEBUG,
                 }
             }
         }
-        ret.push(resolve! {
+        let resolved = resolve! {
             MOV(x,y),
             INC(x),
             DEC(x),
@@ -602,9 +649,63 @@ pub fn compile(code: &[LabelOrInstruction],
             JLT(x,y,z),
             JEQ(x,y,z),
             JGT(x,y,z),
-            INT(x)
-        })
+            INT(x),
+
+            PUSH(x),
+            POP(x),
+            CALL(x),
+            CALL_RET_TO(x,y),
+            JUMP(lab)
+        };
+
+        ret.push(resolved);
     }
 
+    assert!(ret.len() <= 256, "program has {} instructions, limit is 256", ret.len());
     ret
+}
+
+static CURR_STACK: Writable = WrAddr(AddrReg(H));
+static CURR_STACK_R: Readable = ReWr(CURR_STACK);
+
+fn desugar(inst: Instruction, asm: &mut Vec<LabelOrInstruction>) {
+    macro_rules! desugar {
+        ($arg: expr) => { desugar($arg, asm) }
+    }
+    macro_rules! inst {
+        ($arg: expr) => { asm.push(Inst($arg)) }
+    }
+    match inst {
+        PUSH(val) => {
+            // [h] = val
+            // dec h
+            inst!(MOV(CURR_STACK.clone(), val));
+            inst!(DEC(WrReg(H)));
+        }
+        POP(val) => {
+            // inc h
+            // val = [h]
+            inst!(INC(WrReg(H)));
+            inst!(MOV(val, CURR_STACK_R.clone()));
+        }
+        JUMP(lab) => {
+            inst!(MOV(WrPC, lab.into_readable()))
+        }
+        CALL(lab) => {
+            let ret_label = Label { name: format!("ret-label-{}", asm.len()) };
+            desugar!(CALL_RET_TO(lab, PosLabel(ret_label.clone())));
+            asm.push(Label(ret_label));
+        }
+        CALL_RET_TO(func, lab) => {
+            desugar!(PUSH(lab.into_readable()));
+            desugar!(JUMP(func));
+        }
+        RETURN => {
+            desugar!(POP(WrPC))
+        }
+        DEBUG => {
+            inst!(INT(IntLit(8)))
+        }
+        _ => inst!(inst.clone())
+    }
 }
