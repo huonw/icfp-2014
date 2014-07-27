@@ -1,3 +1,13 @@
+; takes x, y and returns (x, y) pair in direction given
+; needs consts.lisp to be included
+(defun inc (x y dir)
+  (if (= dir RIGHT) (cons (+ x 1) y)
+  (if (= dir DOWN) (cons x (+ y 1))
+  (if (= dir LEFT) (cons (- x 1) y)
+  (cons x (- y 1))))))
+
+(defun not-a-wall (value) (>= value EMPTY))
+
 ; the nth cons cell in a (x (y (z ...))) list
 (defun nth-cell (array n)
   (if n (nth-cell (cdr array) (- n 1)) array))

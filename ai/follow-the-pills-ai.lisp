@@ -132,12 +132,6 @@
             p3 ; can go p3
             p4)))))))
 
-(defun inc (x y dir)
-  (if (= dir RIGHT) (cons (+ x 1) y)
-  (if (= dir DOWN) (cons x (+ y 1))
-  (if (= dir LEFT) (cons (- x 1) y)
-  (cons x (- y 1))))))
-
 (defun generate-ghost-pos-2 (ghost-info)
   (if (atom ghost-info) 0
     (let ((ghost (car ghost-info)))
@@ -199,8 +193,6 @@
     )
   )
 )
-
-(defun not-a-wall (value) (>= value EMPTY))
 
 ; don't count the starting places
 (defun pill-or-better (value)
