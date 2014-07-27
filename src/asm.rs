@@ -171,6 +171,8 @@ pub fn print_inst(inst: &Instruction) -> String {
         DUM(x) => format!("DUM {}", x),
         RAP(x) => format!("RAP {}", x),
         ST(x, y) => format!("ST {} {}", x, y),
+        TSEL(x, y) => format!("TSEL {} {}", x, y),
+        TRAP(x) => format!("TRAP {}", x),
         _ => inst.to_string(),
     }
 }

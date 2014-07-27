@@ -576,6 +576,43 @@ impl<'a, 'b> State<'a, 'b> {
                 self.push(asm::NLDF(name));
                 return Some(ty)
             }
+            "while" | "until" => {
+                assert!(num_args >= 1,
+                        "{} needs at least the condition, got {}: {}", name, num_args, *code);
+
+                let is_while = name == "while";
+
+                let loop_start = self.get_next_label("loop-start");
+                let loop_body = self.get_next_label("loop-body");
+                let loop_exit = self.get_next_label("loop-end");
+                let cond = &things[1];
+
+                self.asm.push(Label(loop_start.clone()));
+                self.compile_expr(cond);
+                self.push(if is_while {
+                    asm::NTSEL(loop_body.clone(), loop_exit.clone())
+                } else {
+                    asm::NTSEL(loop_exit.clone(), loop_body.clone())
+                });
+
+                let (ty, loop_asm, loop_branches) =
+                    State::compile_section(format!("{} body", name).as_slice(),
+                                           things.slice_from(2),
+                                           loop_body,
+                                           self.fn_name.clone(),
+                                           self.env.clone(),
+                                           self.branch_count, self.globals,
+                                           asm::LDC(0));
+                if !ty.matches(&Nil) {
+                    fail!("{} should 'return' Nil ({}): {}", name, ty, *code);
+                }
+                self.asm.push_all_move(loop_asm);
+                self.push(asm::NTSEL(loop_start.clone(), loop_start.clone()));
+                self.asm.push(Label(loop_exit));
+                self.branches.push_all_move(loop_branches);
+
+                Some(ty)
+            }
             _ => None
         }
     }
