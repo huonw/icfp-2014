@@ -2,6 +2,7 @@
 (const RIGHT 1)
 (const DOWN 2)
 (const LEFT 3)
+(const NO_DIRECTION 999) ; not opposed to any direction!
 
 (const G_STANDARD 0)
 (const G_FRIGHT 1)

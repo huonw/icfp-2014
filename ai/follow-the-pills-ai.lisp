@@ -5,7 +5,6 @@
 
 (defun main (world undefined)
   (let ((pill-list (pills (car world))))
-    (dbug pill-list)
     (cons
       (cons 0 (cons pill-list (make-list 200 (cons 0 0))))
       step)))
@@ -224,14 +223,23 @@
   (if (= p1 -1) 0
   (let ((xy (inc player-x player-y p1)))
     (let ((x (car xy)) (y (cdr xy)))
-      (if (and (not (opposed dir p1)) (f (opt-get-sq map player-row player-y x y) x y))
-        (cons p1 xy)
+      (if (f (opt-get-sq map player-row player-y x y) x y)
+        (if (opposed dir p1)
+          (if (= p2 -1)
+            (check-surrounds-by-pref map player-row player-x player-y NO_DIRECTION p1 p2 p3 p4 f)
+            (if (= p3 -1)
+              (check-surrounds-by-pref map player-row player-x player-y NO_DIRECTION p2 p1 p3 p4 f)
+              (if (= p4 -1)
+                (check-surrounds-by-pref map player-row player-x player-y NO_DIRECTION p2 p3 p1 p4 f)
+                (check-surrounds-by-pref map player-row player-x player-y NO_DIRECTION p2 p3 p4 p1 f))))
+          (cons p1 xy)
+        )
         (check-surrounds-by-pref map player-row player-x player-y dir p2 p3 p4 -1 f)
       )
     )
   )))
 
-(defun opposed (dir1 dir2) (= (- dir1 dir2) 2))
+(defun opposed (dir1 dir2) (= (abs (- dir1 dir2)) 2))
 
 (defun check-surrounds (map player-row player-x player-y f)
   (let ((x (+ player-x 1)))
