@@ -7,9 +7,10 @@
 (const GHOST_1_PENALTY -10000)
 (const GHOST_2_PENALTY -500)
 (const PILL_BONUS 100)
+(const RECENTLY_VISITED_PENALTY_MULTIPLIER -50)
 
 (defun main (world undefined)
-  (cons 0 step))
+  (cons (make-list 20 (cons 0 0)) step))
 
 (defun for-each (f list)
   (if (atom list)
@@ -21,11 +22,11 @@
 (defun step (state world)
   (let ((player (car (cdr world)))
         (world-map (car world))
-        (ghost-info (tuple-nth world 4 2)))
+        (ghost-info (tuple-nth world 4 2))
+        (recently-visited state))
   (let ((player-pos (car (cdr player))) (player-dir (tuple-nth player 5 2)))
   (let ((player-x (car player-pos))
         (player-y (cdr player-pos))
-        ;(ghost-0 (generate-ghost-pos-0 ghost-info))
         (ghost-1 (generate-ghost-pos-1 ghost-info))
         (ghost-2 (generate-ghost-pos-2 ghost-info)))
   (let ((dir-with-xy-v
@@ -58,12 +59,15 @@
                   (if (point-not-in-list xy ghost-2) (pass) (score GHOST_2_PENALTY)) ; resp. safe, 2 away
                   (score GHOST_1_PENALTY))) ; 1 away from ghost
               ))
-            ;(cons (lambda (s))
+            (cons (lambda (s)
+              ((cdr s)
+                (* (count recently-visited (cdr (car s)))
+                   RECENTLY_VISITED_PENALTY_MULTIPLIER))
+            ) ; recently visited cells
            ; ...
-             0))))
+             0)))))
           )
       ; run each of those on each dimension
-      ;(dbug places)
       (for-each
        (lambda (score)
          (for-each
@@ -71,9 +75,12 @@
           rating-functions))
        places)
       ; find the best one
+      ;(dbug (cons (cons up down) (cons left right)))
       (let ((m (max up (max down (max left right)))))
-        (cons state (if (= m up) UP
+        (cons (update-list recently-visited player-pos) (if (= m up) UP
           (if (= m down) DOWN
             (if (= m left) LEFT
               RIGHT))))
       ))))))))
+
+(defun update-list (list elem) (push-back (cdr list) elem))

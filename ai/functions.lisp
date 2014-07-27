@@ -12,6 +12,11 @@
 
 (defun not-a-wall (value) (>= value EMPTY))
 
+(defun equal (p1 p2) (if (= (car p1) (car p2)) (= (cdr p1) (cdr p2)) 0))
+
+(defun count (list elem) (if (atom list) 0
+  (+ (if (equal elem (car list)) 1 0) (count (cdr list) elem))))
+
 ; the nth cons cell in a (x (y (z ...))) list
 (defun nth-cell (array n)
   (if n (nth-cell (cdr array) (- n 1)) array))
