@@ -6,6 +6,10 @@
   (if (= dir LEFT) (cons (- x 1) y)
   (cons x (- y 1))))))
 
+; don't count the starting places
+(defun pill-or-better (value)
+  (and (>= value PILL) (>= POWER_PILL value)))
+
 (defun not-a-wall (value) (>= value EMPTY))
 
 ; the nth cons cell in a (x (y (z ...))) list

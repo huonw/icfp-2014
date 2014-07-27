@@ -1,7 +1,12 @@
 (include "consts.lisp")
 (include "functions.lisp")
+(include "ghost.lisp")
 
 (const WALL_PENALTY -1000000)
+(const GHOST_0_PENALTY -5000000)
+(const GHOST_1_PENALTY -10000)
+(const GHOST_2_PENALTY -500)
+(const PILL_BONUS 100)
 
 (defun main (world undefined)
   (cons 0 step))
@@ -19,32 +24,43 @@
         (ghost-info (tuple-nth world 4 2)))
   (let ((player-pos (car (cdr player))) (player-dir (tuple-nth player 5 2)))
   (let ((player-x (car player-pos))
-        (player-y (cdr player-pos)))
-  (let ((dir-with-xy (lambda (dir) (cons dir (inc player-x player-y dir)))))
+        (player-y (cdr player-pos))
+        ;(ghost-0 (generate-ghost-pos-0 ghost-info))
+        (ghost-1 (generate-ghost-pos-1 ghost-info))
+        (ghost-2 (generate-ghost-pos-2 ghost-info)))
+  (let ((dir-with-xy-v
+    (lambda (dir)
+      (let ((new-pos (inc player-x player-y dir)))
+        (cons (cons dir (2d-nth world-map (car new-pos) (cdr new-pos))) new-pos)))))
     (let ((up 0)
           (down 0)
           (left 0)
           (right 0))
     (let
           ((places
-           (cons (cons (dir-with-xy UP) (lambda (d) (set up (+ up d))))
-           (cons (cons (dir-with-xy DOWN) (lambda (d) (set down (+ down d))))
-           (cons (cons (dir-with-xy LEFT) (lambda (d) (set left (+ left d))))
-           (cons (cons (dir-with-xy RIGHT) (lambda (d) (set right (+ right d))))
+           (cons (cons (dir-with-xy-v UP) (lambda (d) (set up (+ up d))))
+           (cons (cons (dir-with-xy-v DOWN) (lambda (d) (set down (+ down d))))
+           (cons (cons (dir-with-xy-v LEFT) (lambda (d) (set left (+ left d))))
+           (cons (cons (dir-with-xy-v RIGHT) (lambda (d) (set right (+ right d))))
                  0)))))
-          ; these do computations on each of the (dir, function) pairs
+          ; these do computations on each of the (((dir, value), xy), function) pairs
           ; above, calling the function with an adjustment to make for
           ; the score of that direction
           (rating-functions
-           (cons (lambda (s)
-            (dbug s)
-            (let ((xy (cdr (car s))))
-              (if (not-a-wall (2d-nth world-map (car xy) (cdr xy)))
-                (pass) ((cdr s) WALL_PENALTY)))) ; wall test
-           ;(cons (lambda (s) ...)
-           ;(cons (lambda (s) ...)
+            (cons (lambda (s)
+              (let ((value (cdr (car (car s)))))
+                (if (not-a-wall value)
+                  (pass) ((cdr s) WALL_PENALTY)))) ; wall test
+            (cons (lambda (s) (let ((value (cdr (car (car s)))))(if (pill-or-better value) ((cdr s) PILL_BONUS) (pass))))
+            (cons (lambda (s) (let ((value (cdr (car (car s)))) (xy (cdr (car s))) (score (cdr s)))
+              (if (= value GHOST_START) (score GHOST_0_PENALTY) ; square is a ghost
+                (if (point-not-in-list xy ghost-1)
+                  (if (point-not-in-list xy ghost-2) (pass) (score GHOST_2_PENALTY)) ; resp. safe, 2 away
+                  (score GHOST_1_PENALTY))) ; 1 away from ghost
+              ))
+            ;(cons (lambda (s))
            ; ...
-             0))
+             0))))
           )
       ; run each of those on each dimension
       ;(dbug places)
