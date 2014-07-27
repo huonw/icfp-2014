@@ -1,12 +1,15 @@
 include "consts.asm"
 
-const WALL_PENALTY 100
-const DIR_PENALTY 100
+const WALL_PENALTY 255
+const DIR_PENALTY 255
 const LAST_DIR_PENALTY 1
-const LAST_PLACE_PENALTY 1
+const LAST_PLACE_PENALTY 2
+const MY_INDEX_PENALTY 1
+const OTHER_GHOST_HYPERBOLIC_DIST_PENALTY 10
 
-const PLAYER_DRIFT_BONUS 5
-const MY_INDEX_BONUS 5
+const PLAYER_DRIFT_BONUS 10
+const PLAYER_HYPERBOLIC_DIST_BONUS 150
+const TICK_BONUS 2
 
 decl up
 decl right
@@ -14,23 +17,64 @@ decl down
 decl left
 
 decl tick
+
 decl player_x
 decl player_y
+
 decl my_x
 decl my_y
+
 decl my_vitality
 decl my_direction
 decl my_index
+
+decl candidate_x
+decl candidate_y
+
 decl last_dir
+decl num_ghosts
+
+;;; additive factors for each direction, to be able to loop over them
+decl up_x
+decl up_y
+decl right_x
+decl right_y
+decl down_x
+decl down_y
+decl left_x
+decl left_y
+decl dir_list_end
 
 ;;; last_places is stored as [x, y, x, y, ...], these numbers are the
 ;;; number of cells, not the number of logical pairs.
-const NUM_LAST_PLACES 4
-const LAST_PLACE_MASK 3
+;;; WARNING, this must be the last variable declared.
+const NUM_LAST_PLACES 32
+const LAST_PLACE_MASK 31
 decl last_place_idx
 decl last_places
 
 main:
+        @up_y = 255
+        @right_x = 1
+        @down_y = 1
+        @left_x = 255
+
+;;; Count how many ghosts there are
+        f = @num_ghosts
+        ;; but only when we haven't counted before.
+        jeq count-ghosts-start, f, 0
+        jump count-ghosts-exit
+count-ghosts-start:
+        a = f
+        b = 0
+        int $GHOST_START_POS
+
+        jeq count-ghosts-exit, b, 0
+        f += 1
+        jump count-ghosts-start
+count-ghosts-exit:
+        @num_ghosts = f
+
         @up = 128
         @right = 128
         @down = 128
@@ -43,8 +87,6 @@ main:
 
         int $MY_INDEX
         @my_index = a
-        [a] += $MY_INDEX_BONUS
-
         int $GHOST_CURR_POS
         @my_x = a
         @my_y = b
@@ -61,54 +103,122 @@ main:
         a = $DIR_PENALTY
         c = b
         call apply-penalty
-;;; last direction penalty
+
+;;; tie breakers:
+        ;; going the same direction twice is boring
         a = $LAST_DIR_PENALTY
         c = @last_dir
         call apply-penalty
 
-;;; wall penalties
-        ;; RIGHT
-        a = @my_x
-        a += 1
-        b = @my_y
-        c = &@right
-        d = a
-        e = b
-        call rate-wall
-        call rate-last-visited
+        ;; each bot is slightly different
+        a = @my_index
+        [a] -= $MY_INDEX_PENALTY
 
-        ;; LEFT
-        a = @my_x
-        a -= 1
-        b = @my_y
-        c = &@left
-        d = a
-        e = b
-        call rate-wall
-        call rate-last-visited
+        ;; "random"
+        a = @tick
+        a &= 3
+        [a] += $TICK_BONUS
 
-        ;; DOWN
-        a = @my_x
-        b = @my_y
-        b += 1
-        c = &@down
-        d = a
-        e = b
-        call rate-wall
-        call rate-last-visited
-
-        ;; UP
-        a = @my_x
-        b = @my_y
-        b -= 1
+;;; consider each possible move in turn
+        g = &@up_x
         c = &@up
-        d = a
-        e = b
-        call rate-wall
-        call rate-last-visited
+        ;; c and g should not be touched.
+each-possibility-start:
+        a = @my_x
+        a += [g]
+        g += 1
+        b = @my_y
+        b += [g]
+        g += 1
 
+        @candidate_x = a
+        @candidate_y = b
+
+;;; Check if this square is a wall
+        int $SQUARE_STATUS
+        jgt rate-wall-is-not-wall, a, $WALL
+        a = $WALL_PENALTY
+        call apply-penalty
+        ;; no point wasting energy on this
+        jump each-possibility-continue
+rate-wall-is-not-wall:
+
+;;; Check if we've been here recently
+        e = &@last_places
+        f = g
+        f += $NUM_LAST_PLACES
+visitations-start:
+        a = [e]
+        e += 1
+        ;; last-x == current x
+        jeq visitations-check-y, a, @candidate_x
+        jump visitations-next
+visitations-check-y:
+        a = [e]
+        ;; last-y == current y
+        jeq visitations-penalty, a, @candidate_y
+        jump visitations-next
+visitations-penalty:
+        ;; it's in the list!
+        a = $LAST_PLACE_PENALTY
+        call apply-penalty
+visitations-next:
+        e += 1
+        jlt visitations-start, e, f
+
+;;; Check if this square would be close.
+        a = @player_x
+        b = @candidate_x
+        call abs-difference
+        d = a
+
+        a = @player_y
+        b = @candidate_y
+        call abs-difference
+        d += a
+        d += 1
+
+        a = $PLAYER_HYPERBOLIC_DIST_BONUS
+        a /= d
+        jeq dist-apply-penalty, @my_vitality, $G_FRIGHT
+        call-ret-to apply-bonus dist-end
+dist-apply-penalty:
+        call apply-penalty
+dist-end:
+
+;;; try to avoid going to close to other ghosts, spreading out is
+;;; good.
+        f = 0
+other-ghosts-start:
+        a = f
+        jeq other-ghosts-continue, a, @my_index
+
+        int $GHOST_CURR_POS
+        e = b
+        b = @candidate_x
+        call abs-difference
+        d = a
+        a = e
+        b = @candidate_y
+        call abs-difference
+        d += a
+        d += 1
+        a = $OTHER_GHOST_HYPERBOLIC_DIST_PENALTY
+        a /= d
+        call apply-penalty
+
+other-ghosts-continue:
+        f += 1
+        jlt other-ghosts-start, f, @num_ghosts
+
+        ;; general loop infrastructure:
+each-possibility-continue:
+        c += 1
+        jlt each-possibility-start, c, 4
+
+;;; Try to move towards the player
         a = $PLAYER_DRIFT_BONUS
-;;; Check horizonal directions
+        ;; Check horizonal directions
         jgt player-to-left, @my_x, @player_x
         jeq end-player-hori, @my_x, @player_x
         c = &@right
@@ -119,7 +229,7 @@ player-to-left:
 end-player-hori:
 
         a = $PLAYER_DRIFT_BONUS
-;;; Check vertical
+        ;; Check vertical
         jgt player-above, @my_y, @player_y
         jeq end-player-vert, @my_y, @player_y
         c = &@down
@@ -130,26 +240,16 @@ player-above:
 end-player-vert:
 
         ;; Find the highest rated direction.
-        a = $UP
-        b = @up
-        jgt a-big-1, b, @down
-        a = $DOWN
-        b = @down
-a-big-1:
-        jgt a-big-2, b, @left
-        a = $LEFT
-        b = @left
-a-big-2:
-        jgt a-big-3, b, @right
-        a = $RIGHT
-        b = @right
-a-big-3:
-        c = @up
-        d = @right
-        e = @down
-        f = @left
-        g = @my_direction
+        b = 1
+        a = 0
+max-start:
+        jgt max-continue, [a], [b]
+        a = b
+max-continue:
+        b += 1
+        jlt max-start, b, 4
 
+        ;; save our current move into the last-seen list
         @last_dir = a
         c = &@last_places
         c += @last_place_idx
@@ -158,51 +258,22 @@ a-big-3:
         [c] = @my_y
         @last_place_idx += 2
         @last_place_idx &= $LAST_PLACE_MASK
-
         int $TELL_DIR
         inc @tick
+
+;        a = @up
+;        b = @right
+;        c = @down
+;        d = @left
+;        debug
         hlt
-
-;;; a = x position, b = y position, c = address of variable to adjust
-rate-wall:
-        int $SQUARE_STATUS
-        jgt rate-wall-is-not-wall, a, $WALL
-        a = $WALL_PENALTY
-        call apply-penalty
-rate-wall-is-not-wall:
-        return
-
-;;; c = direction, d = x position, e = y position
-rate-last-visited:
-        g = &@last_places
-        f = g
-        f += $NUM_LAST_PLACES
-visitations-start:
-        b = [g]
-        g += 1
-        ;; last-x == current x
-        jeq visitations-check-y, b, d
-        jump visitations-next
-visitations-check-y:
-        b = [g]
-        ;; last-y == current y
-        jeq visitations-penalty, b, e
-        jump visitations-next
-visitations-penalty:
-        a = $LAST_PLACE_PENALTY
-        call apply-penalty
-visitations-next:
-        g += 1
-        jlt visitations-start, g, f
-        return
-
-
 
 ;;; a = points to add, c = address to adjust
 apply-bonus:
-        push [c]
+        ;;  don't bother updating h, since we don't need to
+        [h] = [c]
         [c] += a
-        pop a
+        a = [h]
         jlt apply-bonus-overflow,[c],a
         return
 apply-bonus-overflow:
@@ -211,11 +282,22 @@ apply-bonus-overflow:
 
 ;;; a = points to remove, c = address to adjust
 apply-penalty:
-        push [c]
+        [h] = [c]
         [c] -= a
-        pop a
+        a = [h]
         jgt apply-penalty-overflow,[c],a
         return
 apply-penalty-overflow:
         [c] = 0
+        return
+
+;;; a = abs(a - b)
+abs-difference:
+        jlt a-d-first-small, a, b
+        a -= b
+        jump a-d-first-end
+a-d-first-small:
+        b -= a
+        a = b
+a-d-first-end:
         return

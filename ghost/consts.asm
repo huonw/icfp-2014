@@ -20,3 +20,7 @@ const GHOST_CURR_POS 5
 const GHOST_INFO 6
 const SQUARE_STATUS 7
 const DEBUG 8
+
+const G_STANDARD 0
+const G_FRIGHT 1
+const G_INVISIBLE 2
