@@ -1,4 +1,6 @@
-use regex::Regex;
+use regex::{mod, Regex};
+
+use std::io::File;
 
 use std::collections::HashMap;
 use std::fmt::{mod, Show, Formatter};
@@ -46,6 +48,21 @@ impl FromStr for Constant {
 impl Show for Constant {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         try!("$".fmt(f));
+        self.name.fmt(f)
+    }
+}
+
+#[deriving(Clone)]
+struct Label {
+    name: String
+}
+impl FromStr for Label {
+    fn from_str(x: &str) -> Option<Label> {
+        Some(Label { name: x.to_string() })
+    }
+}
+impl Show for Label {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         self.name.fmt(f)
     }
 }
@@ -113,11 +130,16 @@ enum Writable {
     WrReg(GPRegister),
     WrAddr(Address),
     WrVariable(Variable),
+    WrPC,
 }
 
 impl FromStr for Writable {
     fn from_str(x: &str) -> Option<Writable> {
-        opt_chain!(x => WrReg | WrAddr | WrVariable)
+        if x == "pc" {
+            Some(WrPC)
+        } else {
+            opt_chain!(x => WrReg | WrAddr | WrVariable)
+        }
     }
 }
 impl Show for Writable {
@@ -126,6 +148,7 @@ impl Show for Writable {
             WrReg(ref r) => r.fmt(f),
             WrAddr(ref a) => a.fmt(f),
             WrVariable(ref v) => v.fmt(f),
+            WrPC => "pc".fmt(f)
         }
     }
 }
@@ -133,17 +156,18 @@ impl Show for Writable {
 #[deriving(Clone)]
 enum Readable {
     ReWr(Writable),
+    ReVariableAddr(Variable),
     ReConst(u8),
     ReConstant(Constant),
-    RePC,
+    ReLabel(Label)
 }
 
 impl FromStr for Readable {
     fn from_str(x: &str) -> Option<Readable> {
-        if x == "pc" {
-            Some(RePC)
+        if x.starts_with("&") {
+            from_str(x.slice_from(1).trim()).map(ReVariableAddr)
         } else {
-            opt_chain!(x => ReWr | ReConst | ReConstant)
+            opt_chain!(x => ReWr | ReConst | ReConstant | ReLabel)
         }
     }
 }
@@ -153,7 +177,11 @@ impl Show for Readable {
             ReWr(ref w) => w.fmt(f),
             ReConst(ref c) => c.fmt(f),
             ReConstant(ref c) => c.fmt(f),
-            RePC => "pc".fmt(f)
+            ReVariableAddr(ref v) => {
+                try!("&".fmt(f));
+                v.fmt(f)
+            }
+            ReLabel(ref l) => l.fmt(f),
         }
     }
 }
@@ -179,7 +207,7 @@ impl Show for Interrupt {
 
 enum PositionOrLabel {
     Pos(u8),
-    PosLabel(String)
+    PosLabel(Label)
 }
 
 impl FromStr for PositionOrLabel {
@@ -366,11 +394,19 @@ impl FromStr for LabelOrInstruction {
 pub fn parse(code: &str) -> (Vec<LabelOrInstruction>,
                          HashMap<String, u8>,
                          HashMap<String, u8>) {
+    static INCLUDES: Regex = regex!("include\\s*\"([^\"]*)\"");
+    let code = INCLUDES.replace_all(code.as_slice(), |captures: &regex::Captures| {
+        let filename = captures.at(1);
+        // errors, what errors?
+        File::open(&Path::new(filename)).unwrap().read_to_string().unwrap()
+    });
+
     static COMMENTS: Regex = regex!(";.*");
-    let code = COMMENTS.replace_all(code, "");
+    let code = COMMENTS.replace_all(code.as_slice(), "");
 
     static OPERATORS: Regex = regex!(r"[+*/&^|-]?=");
     let code = OPERATORS.replace_all(code.as_slice(), " $0 ");
+
 
     let mut variables = HashMap::new();
     let mut variable_index = 255u8;
@@ -435,6 +471,15 @@ trait Resolve {
                labels: &HashMap<String, u8>) -> Self;
 }
 
+fn resolve_variable(var: &Variable,
+                    code: &Instruction,
+                    variables: &HashMap<String, u8>) -> u8 {
+    match variables.find(&var.name) {
+        Some(&val) => val,
+        None => fail!("unknown variable {}: {}", *var, *code)
+    }
+}
+
 impl Resolve for Writable {
     fn resolve(&self,
                code: &Instruction,
@@ -442,25 +487,31 @@ impl Resolve for Writable {
                _constants: &HashMap<String, u8>,
                _labels: &HashMap<String, u8>) -> Writable {
         match *self {
-            WrAddr(_) | WrReg(_) => self.clone(),
-            WrVariable(ref name) => {
-                match variables.find(&name.name) {
-                    Some(&val) => WrAddr(AddrConst(val)),
-                    None => fail!("unknown variable {}: {}", *name, *code)
-                }
-            }
+            WrAddr(_) | WrReg(_) | WrPC => self.clone(),
+            WrVariable(ref name) => WrAddr(AddrConst(resolve_variable(name, code, variables)))
         }
     }
 }
+fn resolve_label(lab: &Label,
+                 code: &Instruction,
+                 labels: &HashMap<String, u8>) -> u8 {
+    match labels.find(&lab.name) {
+        Some(&val) => val,
+        None => fail!("unknown label {}: {}", lab.name, *code)
+    }
+}
+
 impl Resolve for Readable {
     fn resolve(&self,
                code: &Instruction,
                variables: &HashMap<String, u8>,
                constants: &HashMap<String, u8>,
-               _labels: &HashMap<String, u8>) -> Readable {
+               labels: &HashMap<String, u8>) -> Readable {
         match *self {
-            ReConst(_) | RePC => self.clone(),
-            ReWr(ref w) => ReWr(w.resolve(code, variables, constants, _labels)),
+            ReConst(_) => self.clone(),
+            ReWr(ref w) => ReWr(w.resolve(code, variables, constants, labels)),
+            ReVariableAddr(ref v) => ReConst(resolve_variable(v, code, variables)),
+            ReLabel(ref l) => ReConst(resolve_label(l, code, labels)),
             ReConstant(ref name) => {
                 match constants.find(&name.name) {
                     Some(&val) => ReConst(val),
@@ -470,6 +521,7 @@ impl Resolve for Readable {
         }
     }
 }
+
 impl Resolve for PositionOrLabel {
     fn resolve(&self,
                code: &Instruction,
@@ -478,12 +530,7 @@ impl Resolve for PositionOrLabel {
                labels: &HashMap<String, u8>) -> PositionOrLabel {
         match *self {
             Pos(x) => Pos(x),
-            PosLabel(ref name) => {
-                match labels.find(name) {
-                    Some(&val) => Pos(val),
-                    None => fail!("unknown label {}: {}", *name, *code)
-                }
-            }
+            PosLabel(ref name) => Pos(resolve_label(name, code, labels))
         }
     }
 }
@@ -520,8 +567,8 @@ pub fn compile(code: &[LabelOrInstruction],
         }
     }
 
-    assert!(index + variables.len() <= 256,
-            "program too long, has {} instructions and {} variables", index, variables.len());
+    assert!(index <= 256, "program has {} instructions, limit is 256", index);
+    assert!(variables.len() <= 256, "program has {} variables, limit is 256", variables.len());
 
     let mut ret = vec![];
     for thing in code.iter() {
