@@ -13,10 +13,15 @@ const ONE 1
 decl A
 decl B
 
-        mov @A,$ONE
-        mov @B,@A
-        mov @B,$ONE
-        mov a,@B
+        int $DEBUG
+        inc c
+        @A = $ONE
+        @B = @A
+        @B += $ONE
+        h = @B
+        int $DEBUG
+        a |= @B
+        int $DEBUG
         int $TELL_DIR
         jlt label, @A, @A
 label:

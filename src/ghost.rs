@@ -323,6 +323,34 @@ enum LabelOrInstruction {
     Inst(Instruction),
     Label(String)
 }
+
+enum BinOp {
+    BMov, BAdd, BSub, BMul, BDiv, BAnd, BOr, BXor
+}
+impl BinOp {
+    fn construct(&self, lhs: Writable, rhs: Readable) -> Instruction {
+        (match *self {
+            BMov => MOV, BAdd => ADD, BSub => SUB, BMul => MUL,
+            BDiv => DIV, BAnd => AND, BOr => OR, BXor => XOR
+        })(lhs, rhs)
+    }
+}
+impl FromStr for BinOp {
+    fn from_str(x: &str) -> Option<BinOp> {
+        Some(match x {
+            "=" => BMov,
+            "+=" => BAdd,
+            "-=" => BSub,
+            "*=" => BMul,
+            "/=" => BDiv,
+            "&=" => BAnd,
+            "|=" => BOr,
+            "^=" => BXor,
+            _ => return None
+        })
+    }
+}
+
 impl FromStr for LabelOrInstruction {
     fn from_str(x: &str) -> Option<LabelOrInstruction> {
         let mut w = x.words();
@@ -340,6 +368,9 @@ pub fn parse(code: &str) -> (Vec<LabelOrInstruction>,
                          HashMap<String, u8>) {
     static COMMENTS: Regex = regex!(";.*");
     let code = COMMENTS.replace_all(code, "");
+
+    static OPERATORS: Regex = regex!(r"[+*/&^|-]?=");
+    let code = OPERATORS.replace_all(code.as_slice(), " $0 ");
 
     let mut variables = HashMap::new();
     let mut variable_index = 255u8;
@@ -364,6 +395,7 @@ pub fn parse(code: &str) -> (Vec<LabelOrInstruction>,
                 } else {
                     fail!("decls only allowed at the top of a file: {}", line)
                 }
+                continue
             }
             (Some("const"), Some(name), Some(value), None) => {
                 match from_str::<u8>(value) {
@@ -371,15 +403,24 @@ pub fn parse(code: &str) -> (Vec<LabelOrInstruction>,
                                        "duplicated constant {}: {}", name, line),
                     None => fail!("constant with invalid value {}: {}", name, line)
                 }
+                continue
             }
-            _ => {
-                initial = false;
-
-                match from_str::<LabelOrInstruction>(line) {
-                    Some(x) => parsed.push(x),
-                    None => fail!("could not parse {}", line)
+            (Some(lhs), Some(op), Some(rhs), None) => {
+                match (from_str(lhs), from_str::<BinOp>(op), from_str(rhs)) {
+                    (Some(l), Some(b_op), Some(r)) => {
+                        parsed.push(Inst(b_op.construct(l, r)));
+                        continue
+                    }
+                    _ => {}
                 }
             }
+            _ => {}
+        }
+        initial = false;
+
+        match from_str::<LabelOrInstruction>(line) {
+            Some(x) => parsed.push(x),
+            None => fail!("could not parse {}", line)
         }
     }
 
