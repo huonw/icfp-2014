@@ -27,6 +27,7 @@
   (let ((player-pos (car (cdr player))) (player-dir (tuple-nth player 5 2)))
   (let ((player-x (car player-pos))
         (player-y (cdr player-pos))
+        (ghost-0 (generate-ghost-pos-0 ghost-info))
         (ghost-1 (generate-ghost-pos-1 ghost-info))
         (ghost-2 (generate-ghost-pos-2 ghost-info)))
   (let ((dir-with-xy-v
@@ -54,10 +55,11 @@
                   (pass) ((cdr s) WALL_PENALTY)))) ; wall test
             (cons (lambda (s) (let ((value (cdr (car (car s)))))(if (pill-or-better value) ((cdr s) PILL_BONUS) (pass))))
             (cons (lambda (s) (let ((value (cdr (car (car s)))) (xy (cdr (car s))) (score (cdr s)))
-              (if (= value GHOST_START) (score GHOST_0_PENALTY) ; square is a ghost
+              (if (point-not-in-list xy ghost-0)
                 (if (point-not-in-list xy ghost-1)
                   (if (point-not-in-list xy ghost-2) (pass) (score GHOST_2_PENALTY)) ; resp. safe, 2 away
-                  (score GHOST_1_PENALTY))) ; 1 away from ghost
+                  (score GHOST_1_PENALTY)) ; 1 away from ghost
+                (score GHOST_0_PENALTY)) ; square is a ghost
               ))
             (cons (lambda (s)
               ((cdr s)
