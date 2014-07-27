@@ -2,8 +2,11 @@ include "consts.asm"
 
 const WALL_PENALTY 100
 const DIR_PENALTY 100
-const PLAYER_DRIFT_BONUS 5
 const LAST_DIR_PENALTY 1
+const LAST_PLACE_PENALTY 1
+
+const PLAYER_DRIFT_BONUS 5
+const MY_INDEX_BONUS 5
 
 decl up
 decl right
@@ -15,12 +18,19 @@ decl player_x
 decl player_y
 decl my_x
 decl my_y
+decl my_vitality
 decl my_direction
 decl my_index
 decl last_dir
 
-main:
+;;; last_places is stored as [x, y, x, y, ...], these numbers are the
+;;; number of cells, not the number of logical pairs.
+const NUM_LAST_PLACES 4
+const LAST_PLACE_MASK 3
+decl last_place_idx
+decl last_places
 
+main:
         @up = 128
         @right = 128
         @down = 128
@@ -33,6 +43,7 @@ main:
 
         int $MY_INDEX
         @my_index = a
+        [a] += $MY_INDEX_BONUS
 
         int $GHOST_CURR_POS
         @my_x = a
@@ -40,8 +51,8 @@ main:
 
         a = @my_index
         int $GHOST_INFO
+        @my_vitality = a
         @my_direction = b
-        debug
 
 ;;; opposite direction penalty
         ;; flip the direction, the direction variables are at fixed
@@ -61,28 +72,40 @@ main:
         a += 1
         b = @my_y
         c = &@right
+        d = a
+        e = b
         call rate-wall
+        call rate-last-visited
 
         ;; LEFT
         a = @my_x
         a -= 1
         b = @my_y
         c = &@left
+        d = a
+        e = b
         call rate-wall
+        call rate-last-visited
 
         ;; DOWN
         a = @my_x
         b = @my_y
         b += 1
         c = &@down
+        d = a
+        e = b
         call rate-wall
+        call rate-last-visited
 
         ;; UP
         a = @my_x
         b = @my_y
         b -= 1
         c = &@up
+        d = a
+        e = b
         call rate-wall
+        call rate-last-visited
 
         a = $PLAYER_DRIFT_BONUS
 ;;; Check horizonal directions
@@ -126,8 +149,15 @@ a-big-3:
         e = @down
         f = @left
         g = @my_direction
+
         @last_dir = a
-        debug
+        c = &@last_places
+        c += @last_place_idx
+        [c] = @my_x
+        c += 1
+        [c] = @my_y
+        @last_place_idx += 2
+        @last_place_idx &= $LAST_PLACE_MASK
 
         int $TELL_DIR
         inc @tick
@@ -141,6 +171,31 @@ rate-wall:
         call apply-penalty
 rate-wall-is-not-wall:
         return
+
+;;; c = direction, d = x position, e = y position
+rate-last-visited:
+        g = &@last_places
+        f = g
+        f += $NUM_LAST_PLACES
+visitations-start:
+        b = [g]
+        g += 1
+        ;; last-x == current x
+        jeq visitations-check-y, b, d
+        jump visitations-next
+visitations-check-y:
+        b = [g]
+        ;; last-y == current y
+        jeq visitations-penalty, b, e
+        jump visitations-next
+visitations-penalty:
+        a = $LAST_PLACE_PENALTY
+        call apply-penalty
+visitations-next:
+        g += 1
+        jlt visitations-start, g, f
+        return
+
 
 
 ;;; a = points to add, c = address to adjust
@@ -159,7 +214,7 @@ apply-penalty:
         push [c]
         [c] -= a
         pop a
-        jgt apply-bonus-overflow,[c],a
+        jgt apply-penalty-overflow,[c],a
         return
 apply-penalty-overflow:
         [c] = 0
