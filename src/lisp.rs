@@ -210,7 +210,8 @@ pub fn compile(code: &AST) -> Vec<LabelOrInstruction> {
 
     let mut asm = vec![];
     for func in fns.iter() {
-        asm.push_all_move(State::compile_fn(func, &mut branch_count, &globals).val1())
+        asm.push_all_move(State::compile_fn("function body",
+                                            func, &mut branch_count, &globals).val1())
     }
 
     asm
@@ -220,6 +221,7 @@ pub fn compile(code: &AST) -> Vec<LabelOrInstruction> {
 #[deriving(PartialEq, Eq, Clone, Show)]
 enum TypeInfo {
     Unknown,
+    Nil,
     Int,
     Cons,
     Function(u32),
@@ -232,14 +234,23 @@ impl TypeInfo {
     fn all_matches(vec: &[TypeInfo], x: &TypeInfo) -> bool {
         vec.iter().all(|t| t.matches(x))
     }
+    fn first_are_nil_get_last<'a>(vec: &'a [TypeInfo]) -> Option<&'a TypeInfo> {
+        if TypeInfo::all_matches(vec.init(), &Nil) {
+            vec.last()
+        } else {
+            None
+        }
+    }
 }
 
 impl<'a, 'b> State<'a, 'b> {
-    pub fn compile_fn<'a>(code: &FnInfo<'a>, branch_count: &mut uint,
+    pub fn compile_fn<'a>(kind: &str,
+                          code: &FnInfo<'a>, branch_count: &mut uint,
                           globals: &HashMap<&'a str, TopLevelValue>) ->
         (TypeInfo, Vec<LabelOrInstruction>) {
         let (ty, mut asm, branches) =
-            State::compile_section(code.body,
+            State::compile_section(kind,
+                                   code.body,
                                    code.name.to_string(),
                                    code.name.to_string(),
                                    code.args.clone(), branch_count, globals, asm::RTN);
@@ -247,7 +258,8 @@ impl<'a, 'b> State<'a, 'b> {
         (ty, asm)
     }
 
-    fn compile_section(body: &'a [AST], name: String, fn_name: String,
+    fn compile_section(kind: &str,
+                       body: &'a [AST], name: String, fn_name: String,
                        env: Rc<Env<'a>>, branch_count: &mut uint,
                        globals: &HashMap<&'a str, TopLevelValue>, tail: Instruction)
                            -> (TypeInfo,
@@ -260,10 +272,17 @@ impl<'a, 'b> State<'a, 'b> {
             branch_count: branch_count,
             globals: globals
         };
-        let mut ty = Unknown;
+        let mut tys = vec![];
         for thing in body.iter() {
-            ty = state.compile_expr(thing);
+            tys.push(state.compile_expr(thing));
         }
+        let ty = match TypeInfo::first_are_nil_get_last(tys.as_slice()) {
+            Some(t) => t.clone(),
+            None => {
+                fail!("{} with non-Nil arguments ({}): {}",
+                      kind, tys, body);
+            }
+        };
         state.push_raw(tail);
         let State { asm, branches, .. } = state;
         (ty, asm, branches)
@@ -323,124 +342,12 @@ impl<'a, 'b> State<'a, 'b> {
                 let head = &things[0];
 
                 match *head {
-                    Atom(ref name) if name.as_slice() == "if" => {
-                        assert!(num_args == 3, "if needs 3 things, got {}: {}",
-                                num_args, things);
-                        // (if cond true false)
-
-                        // compile and push the cond expr
-                        let ty = self.compile_expr(&things[1]);
-                        assert!(ty.matches(&Int),
-                                "if condition was {}, not Int: {}",
-                                ty, &things[1]);
-
-                        let label_t = self.get_next_label("branch");
-                        let (ty_t, asm_t, branches_t) =
-                            State::compile_section(things.slice(2, 3),
-                                                   label_t.clone(),
-                                                   self.fn_name.clone(),
-                                                   self.env.clone(),
-                                                   self.branch_count, self.globals, asm::JOIN);
-                        let label_f = self.get_next_label("branch");
-                        let (ty_f, asm_f, branches_f) =
-                            State::compile_section(things.slice(3, 4),
-                                                   label_f.clone(),
-                                                   self.fn_name.clone(),
-                                                   self.env.clone(),
-                                                   self.branch_count, self.globals, asm::JOIN);
-
-                        let ty = if ty_t == Unknown || ty_f == ty_t {
-                            ty_f
-                        } else if ty_f == Unknown {
-                            ty_f
-                        } else {
-                            Many(vec![ty_t,ty_f])
-                        };
-
-                        self.push(asm::NSEL(label_t, label_f));
-
-                        self.branches.push(asm_t);
-                        self.branches.push_all_move(branches_t);
-                        self.branches.push(asm_f);
-                        self.branches.push_all_move(branches_f);
-
-                        return ty
-                    }
-                    Atom(ref name) if name.as_slice() == "set" => {
-                        assert!(num_args == 2, "set needs two things, got {}: {}", num_args, *code);
-
-                        let name = match things[1] {
-                            Atom(ref name) => name,
-                            ref x => fail!("Expected variable name but got {}: {}", *x, *code)
-                        };
-
-                        let ty = self.compile_expr(&things[2]);
-
-                        let (frame, address) = match self.env.find(name.as_slice()) {
-                            Some((f, a, mut old_ty)) => {
-                                if ty != *old_ty {
-                                    // can't warn here, because 0 is a list.
-                                    *old_ty = Unknown
-                                }
-                                (f, a)
-                            }
-                            None => fail!("failed to find local variable {}: {}", name, *code)
-                        };
-                        self.push_raw(asm::ST(frame, address));
-                        return Unknown
-                    }
-                    Atom(ref name) if name.as_slice() == "let" => {
-                        // (let ((name expression) ...) value)
-                        assert!(num_args >= 2, "let needs two things, got {}: {}", num_args, *code);
-
-                        let pairs = match things[1] {
-                            Sequence(ref pairs) => {
-                                pairs.iter().map(extract_let_pair).collect::<Vec<(&str, &AST)>>()
-                            }
-                            _ => fail!("let needs pairs, found {}: {}", things[1], *code)
-                        };
-
-                        let mut new_frame = HashMap::new();
-                        for (i, &(name, body)) in pairs.iter().enumerate() {
-                            // evaluate each argument, placing it on the stack
-                            let ty = self.compile_expr(body);
-                            assert!(new_frame.insert(name, (i as u32, RefCell::new(ty))),
-                                    "let with duplicated name {}: {}", name, *code)
+                    Atom(ref name) => {
+                        match self.try_compile_special_builtin(name.as_slice(),
+                                                               things.as_slice(), code) {
+                            Some(ty) => return ty,
+                            None => {}
                         }
-                        let let_label = self.get_next_label("let");
-                        self.push_raw(asm::DUM(pairs.len() as u32));
-                        self.push(asm::NLDF(let_label.clone()));
-                        self.push_raw(asm::RAP(pairs.len() as u32));
-
-                        let env = Rc::new(Env {
-                            here: new_frame,
-                            parent: Some(self.env.clone())
-                        });
-
-                        // evaluate all the things
-                        let (let_ty, let_asm, let_branches) =
-                            State::compile_section(things.slice_from(2),
-                                                   let_label.clone(),
-                                                   self.fn_name.clone(),
-                                                   env.clone(),
-                                                   self.branch_count, self.globals, asm::RTN);
-                        self.branches.push(let_asm);
-                        self.branches.push_all_move(let_branches);
-                        return let_ty
-                    }
-                    Atom(ref name) if name.as_slice() == "lambda" => {
-                        // (lambda (x y...) value...)
-                        assert!(num_args >= 2,
-                                "lambda needs at least two things, got {}: {}", num_args, *code);
-
-                        let name = self.get_next_label("lambda");
-                        let fninfo = parse_fn_decl(name.clone(), &things[1], things.slice_from(2),
-                                                   Some(self.env.clone()));
-                        let (ty,compiled) =
-                            State::compile_fn(&fninfo, self.branch_count, self.globals);
-                        self.branches.push(compiled);
-                        self.push(asm::NLDF(name));
-                        return ty
                     }
                     _ => {}
                 }
@@ -465,7 +372,18 @@ impl<'a, 'b> State<'a, 'b> {
                             // which has already happened at this point.
                             // (do (x y z) (a b c) (d e f))
                             "do" | "pass" => {
-                                return Unknown
+                                if num_args == 0 {
+                                    return Nil
+                                } else {
+                                    match TypeInfo::first_are_nil_get_last(arg_tys.as_slice()) {
+                                        Some(ty) => return ty.clone(),
+                                        None => {
+                                            fail!("some non-Nil argument to `do` ({}): {}",
+                                                  arg_tys.init(),
+                                                  *code)
+                                        }
+                                    }
+                                }
                             }
                             "+" | "*" => {
                                 // (add a b c d ...)
@@ -491,8 +409,8 @@ impl<'a, 'b> State<'a, 'b> {
                             "car" => x!(CAR, Cons, Unknown, 1),
                             "cdr" => x!(CDR, Cons, Unknown, 1),
                             "atom" => x!(ATOM, Unknown, Int, 1),
-                            "brk" => x!(BRK, Unknown, Unknown, 0),
-                            "dbug" => x!(DBUG, Unknown, Unknown, 1),
+                            "brk" => x!(BRK, Unknown, Nil, 0),
+                            "dbug" => x!(DBUG, Unknown, Nil, 1),
                             "=" => x!(CEQ, Int, Int, 2),
                             ">=" => x!(CGTE, Int, Int, 2),
                             ">" => x!(CGT, Int, Int, 2),
@@ -528,6 +446,137 @@ impl<'a, 'b> State<'a, 'b> {
                 self.push_raw(asm::AP(num_args as u32));
                 Unknown
             }
+        }
+    }
+
+    fn try_compile_special_builtin(&mut self, name: &str, things: &'a [AST], code: &'a AST)
+                                   -> Option<TypeInfo> {
+        let num_args = things.len() - 1;
+        match name {
+            "if" => {
+                assert!(num_args == 3, "if needs 3 things, got {}: {}",
+                        num_args, things);
+                // (if cond true false)
+
+                // compile and push the cond expr
+                let ty = self.compile_expr(&things[1]);
+                assert!(ty.matches(&Int),
+                        "if condition was {}, not Int: {}",
+                        ty, &things[1]);
+
+                let label_t = self.get_next_label("branch");
+                let (ty_t, asm_t, branches_t) =
+                    State::compile_section("if branch",
+                                           things.slice(2, 3),
+                                           label_t.clone(),
+                                           self.fn_name.clone(),
+                                           self.env.clone(),
+                                           self.branch_count, self.globals, asm::JOIN);
+                let label_f = self.get_next_label("branch");
+                let (ty_f, asm_f, branches_f) =
+                    State::compile_section("if branch",
+                                           things.slice(3, 4),
+                                           label_f.clone(),
+                                           self.fn_name.clone(),
+                                           self.env.clone(),
+                                           self.branch_count, self.globals, asm::JOIN);
+
+                let ty = if ty_t == Unknown || ty_f == ty_t {
+                    ty_f
+                } else if ty_f == Unknown {
+                    ty_f
+                } else {
+                    Many(vec![ty_t,ty_f])
+                };
+
+                self.push(asm::NSEL(label_t, label_f));
+
+                self.branches.push(asm_t);
+                self.branches.push_all_move(branches_t);
+                self.branches.push(asm_f);
+                self.branches.push_all_move(branches_f);
+
+                return Some(ty)
+            }
+            "set" => {
+                assert!(num_args == 2, "set needs two things, got {}: {}", num_args, *code);
+
+                let name = match things[1] {
+                    Atom(ref name) => name,
+                    ref x => fail!("Expected variable name but got {}: {}", *x, *code)
+                };
+
+                let ty = self.compile_expr(&things[2]);
+
+                let (frame, address) = match self.env.find(name.as_slice()) {
+                    Some((f, a, mut old_ty)) => {
+                        if ty != *old_ty {
+                            // can't warn here, because 0 is a list.
+                            *old_ty = Unknown
+                        }
+                        (f, a)
+                    }
+                    None => fail!("failed to find local variable {}: {}", name, *code)
+                };
+                self.push_raw(asm::ST(frame, address));
+                return Some(Nil)
+            }
+            "let" => {
+                // (let ((name expression) ...) value)
+                assert!(num_args >= 2, "let needs two things, got {}: {}", num_args, *code);
+
+                let pairs = match things[1] {
+                    Sequence(ref pairs) => {
+                        pairs.iter().map(extract_let_pair).collect::<Vec<(&str, &AST)>>()
+                    }
+                    _ => fail!("let needs pairs, found {}: {}", things[1], *code)
+                };
+
+                let mut new_frame = HashMap::new();
+                for (i, &(name, body)) in pairs.iter().enumerate() {
+                    // evaluate each argument, placing it on the stack
+                    let ty = self.compile_expr(body);
+                    assert!(new_frame.insert(name, (i as u32, RefCell::new(ty))),
+                            "let with duplicated name {}: {}", name, *code)
+                }
+                let let_label = self.get_next_label("let");
+                self.push_raw(asm::DUM(pairs.len() as u32));
+                self.push(asm::NLDF(let_label.clone()));
+                self.push_raw(asm::RAP(pairs.len() as u32));
+
+                let env = Rc::new(Env {
+                    here: new_frame,
+                    parent: Some(self.env.clone())
+                });
+
+                // evaluate all the things
+                let (let_ty, let_asm, let_branches) =
+                    State::compile_section("let body",
+                                           things.slice_from(2),
+                                           let_label.clone(),
+                                           self.fn_name.clone(),
+                                           env.clone(),
+                                           self.branch_count, self.globals, asm::RTN);
+                self.branches.push(let_asm);
+                self.branches.push_all_move(let_branches);
+                return Some(let_ty)
+            }
+            "lambda" => {
+                // (lambda (x y...) value...)
+                assert!(num_args >= 2,
+                        "lambda needs at least two things, got {}: {}", num_args, *code);
+
+                let name = self.get_next_label("lambda");
+                let fninfo = parse_fn_decl(name.clone(), &things[1], things.slice_from(2),
+                                           Some(self.env.clone()));
+                let (ty,compiled) =
+                    State::compile_fn("lambda body",
+                                      &fninfo, self.branch_count, self.globals);
+                self.branches.push(compiled);
+                self.push(asm::NLDF(name));
+                return Some(ty)
+            }
+            _ => None
         }
     }
 }
