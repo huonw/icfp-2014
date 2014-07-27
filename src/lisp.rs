@@ -569,12 +569,12 @@ impl<'a, 'b> State<'a, 'b> {
                 let name = self.get_next_label("lambda");
                 let fninfo = parse_fn_decl(name.clone(), &things[1], things.slice_from(2),
                                            Some(self.env.clone()));
-                let (ty,compiled) =
+                let (_, compiled) =
                     State::compile_fn("lambda body",
                                       &fninfo, self.branch_count, self.globals);
                 self.branches.push(compiled);
                 self.push(asm::NLDF(name));
-                return Some(ty)
+                return Some(Function(fninfo.args.here.len() as u32))
             }
             "while" | "until" => {
                 assert!(num_args >= 1,
