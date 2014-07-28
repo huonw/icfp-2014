@@ -35,9 +35,10 @@
         (player-pos (car (cdr player))) (player-dir (tuple-nth player 5 2)))
   (let ((player-x (car player-pos))
         (player-y (cdr player-pos))
-        (ghost-0 (generate-ghost-pos-0 ghost-info))
-        (ghost-1 (generate-ghost-pos-1 ghost-info))
-        (ghost-2 (generate-ghost-pos-2 ghost-info)))
+        ;(ghost-0 (generate-ghost-pos-0 ghost-info))
+        ;(ghost-1 (generate-ghost-pos-1 ghost-info))
+        ;(ghost-2 (generate-ghost-pos-2 ghost-info))
+        )
   (let ((dir-with-xy-v
     (lambda (dir)
       (let ((new-pos (inc player-x player-y dir)))
@@ -94,20 +95,20 @@
     )
     (let
           ((places
-           (cons (cons (dir-with-xy-v UP) (lambda (d) (set up (+ up d))))
-           (cons (cons (dir-with-xy-v DOWN) (lambda (d) (set down (+ down d))))
-           (cons (cons (dir-with-xy-v LEFT) (lambda (d) (set left (+ left d))))
-           (cons (cons (dir-with-xy-v RIGHT) (lambda (d) (set right (+ right d))))
+           (cons (cons (dir-with-xy-v UP) (cons (lambda (d) (set up (+ up d))) (lambda () up)))
+           (cons (cons (dir-with-xy-v DOWN) (cons (lambda (d) (set down (+ down d))) (lambda () down)))
+           (cons (cons (dir-with-xy-v LEFT) (cons (lambda (d) (set left (+ left d))) (lambda () left)))
+           (cons (cons (dir-with-xy-v RIGHT) (cons (lambda (d) (set right (+ right d))) (lambda () right)))
                  0)))))
           ; these do computations on each of the (((dir, value), xy), function) pairs
           ; above, calling the function with an adjustment to make for
           ; the score of that direction
           (rating-functions
-            (cons (lambda (s)
-              (let ((value (cdr (car (car s)))))
+            (cons (lambda (dir-xy-v score)
+              (let ((value (cdr (car dir-xy-v))))
                 (if (not-a-wall value)
-                  (pass) ((cdr s) WALL_PENALTY)))) ; wall test
-            (cons (lambda (s) (let ((value (cdr (car (car s)))))(if (pill-or-better value) ((cdr s) PILL_BONUS) (pass))))
+                  (pass) (score WALL_PENALTY)))) ; wall test
+            (cons (lambda (dir-xy-v score) (let ((value (cdr (car dir-xy-v))))(if (pill-or-better value) (score PILL_BONUS) (pass))))
             ;(cons (lambda (s) (let ((value (cdr (car (car s)))) (xy (cdr (car s))) (score (cdr s)))
             ;  (if (point-not-in-list xy ghost-0)
             ;    (if (point-not-in-list xy ghost-1)
@@ -115,18 +116,17 @@
             ;      (score GHOST_1_PENALTY)) ; 1 away from ghost
             ;    (score GHOST_0_PENALTY)) ; square is a ghost
             ;  ))
-            (cons (lambda (s)
-              ((cdr s)
-                (* (count recently-visited (cdr (car s)))
+            (cons (lambda (dir-xy-v score)
+              (score
+                (* (count recently-visited (cdr dir-xy-v))
                    RECENTLY_VISITED_PENALTY_MULTIPLIER))
             ) ; recently visited cells
-            (cons (lambda (s) (for-each
+            (cons (lambda (dir-xy-v score) (for-each
               (lambda (ghost)
                 (let ((ghost-pos (car (cdr ghost)))
                       (ghost-dir (cdr (cdr ghost)))
                       (ghost-status (car ghost))
-                      (score (cdr s))
-                      (xy (cdr (car s))))
+                      (xy (cdr dir-xy-v)))
                 (let ((dist (+ 1 (abs (- (car ghost-pos) (car xy))) (abs (- (cdr ghost-pos) (cdr xy))))))
                   (score (/ (/ GHOST_MANHATTAN_PENALTY (* dist dist dist dist dist dist)) 
                             (if (= ghost-status G_STANDARD) 1 (if (= ghost-status G_FRIGHT) -1 2))))
@@ -140,7 +140,11 @@
       (for-each
        (lambda (score)
          (for-each
-          (lambda (rate) (rate score))
+          (lambda (rate) 
+            (if (> -500000 ((cdr (cdr score))))
+              (pass (dbug ((cdr (cdr score)))))
+              (rate (car score) (car (cdr score))))
+            )
           rating-functions))
        places)
       ; find the best one
