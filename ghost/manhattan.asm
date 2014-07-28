@@ -1,12 +1,13 @@
 include "consts.asm"
 
 const WALL_PENALTY 255
-const DIR_PENALTY 255
+const DIR_PENALTY 100
 const LAST_DIR_PENALTY 1
 const LAST_PLACE_PENALTY 2
 const MY_INDEX_PENALTY 1
 const OTHER_GHOST_HYPERBOLIC_DIST_PENALTY 10
 
+const WALK_ON_PILLS_BONUS 5
 const PLAYER_DRIFT_BONUS 10
 const PLAYER_HYPERBOLIC_DIST_BONUS 150
 const TICK_BONUS 2
@@ -30,6 +31,7 @@ decl my_index
 
 decl candidate_x
 decl candidate_y
+decl candidate_square_status
 
 decl last_dir
 decl num_ghosts
@@ -136,12 +138,19 @@ each-possibility-start:
 
 ;;; Check if this square is a wall
         int $SQUARE_STATUS
+        @candidate_square_status = a
         jgt rate-wall-is-not-wall, a, $WALL
         a = $WALL_PENALTY
         call apply-penalty
         ;; no point wasting energy on this
         jump each-possibility-continue
 rate-wall-is-not-wall:
+        jeq not-a-pill, @candidate_square_status, $EMPTY
+        jgt not-a-pill, @candidate_square_status, $FRUIT
+        a = $WALK_ON_PILLS_BONUS
+        call apply-bonus
+not-a-pill:
+
 
 ;;; Check if we've been here recently
         e = &@last_places
@@ -176,6 +185,9 @@ visitations-next:
         b = @candidate_y
         call abs-difference
         d += a
+        ;; only apply the bonus/penalty when the distance is closish
+        jgt dist-end, d, 10
+        d *= d
         d += 1
 
         a = $PLAYER_HYPERBOLIC_DIST_BONUS
@@ -188,29 +200,34 @@ dist-end:
 
 ;;; try to avoid going to close to other ghosts, spreading out is
 ;;; good.
-        f = 0
-other-ghosts-start:
-        a = f
-        jeq other-ghosts-continue, a, @my_index
-
-        int $GHOST_CURR_POS
-        e = b
-        b = @candidate_x
-        call abs-difference
-        d = a
-        a = e
-        b = @candidate_y
-        call abs-difference
-        d += a
-        d += 1
-        a = $OTHER_GHOST_HYPERBOLIC_DIST_PENALTY
-        a /= d
-        call apply-penalty
-
-other-ghosts-continue:
-        f += 1
-        jlt other-ghosts-start, f, @num_ghosts
-
+;        f = 0
+;        jump other-ghosts-end
+;other-ghosts-start:
+;        a = f
+;        jeq other-ghosts-continue, a, @my_index
+;
+;        int $GHOST_CURR_POS
+;        e = b
+;        b = @candidate_x
+;        call abs-difference
+;        d = a
+;        a = e
+;        b = @candidate_y
+;        call abs-difference
+;        d += a
+;        ;; too far to bother
+;        jgt other-ghosts-continue, d, 10
+;        d *= d
+;        d += 1
+;        a = $OTHER_GHOST_HYPERBOLIC_DIST_PENALTY
+;        a /= d
+;        call apply-penalty
+;
+;other-ghosts-continue:
+;        f += 1
+;        jlt other-ghosts-start, f, @num_ghosts
+;other-ghosts-end:
+;
         ;; general loop infrastructure:
 each-possibility-continue:
         c += 1
