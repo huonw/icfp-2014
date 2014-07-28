@@ -1,0 +1,26 @@
+An implementation of a basic lisp and a simple assembler in Rust.
+
+Compile with `cargo build` to get a ./target/icfp-2014 binary (see
+--help for basic instructions)
+
+
+The lisp supports mutation (with ST) and loops (via the TSEL
+instruction), and the assembler emulates a stack, using register h as
+the stack pointer.
+
+The lambda bot (ai/rating-bot.lisp, compiled with `../target/icfp-2014
+rating-bot.lisp` in that directory) was implement in the lisp, simply
+by giving each possible move a rating based on various heuristics
+(like the proximity of the ghosts, if there's a pill there, if it's
+moving towards the fruit/a power pill, if we've visited the cell
+recently).
+
+The ghost (ghost/manhattan.asm, compiled with `../target/icfp-2014
+--ghost manhattan` in that directory) is similar, although with
+simpler heuristics, due to easily hitting the instruction limit.
+
+
+Versions:
+
+- rustc 0.12.0-pre-nightly (a4553453a 2014-07-25 00:36:11 +0000)
+- cargo-nightly 0.1.0-pre (0759283 2014-07-24 19:44:41 +0000)
