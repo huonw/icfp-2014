@@ -17,6 +17,20 @@
 (defun count (list elem) (if (atom list) 0
   (+ (if (equal elem (car list)) 1 0) (count (cdr list) elem))))
 
+(defun count-with-index-weighting (list elem)
+  (let ((s 0) (e 0) (x (car elem)) (y (cdr elem)) (i 0))
+    (until (atom list)
+     (set e (car list))
+     (if (= (car e) x)
+         (if (= (cdr e) y)
+             (set s (+ s i 1))
+             (pass))
+       (pass))
+     (set list (cdr list))
+     (set i (+ i 1))
+     )
+    s))
+
 ; the nth cons cell in a (x (y (z ...))) list
 (defun nth-cell (array n)
   (if n (nth-cell (cdr array) (- n 1)) array))
@@ -96,7 +110,7 @@
 
 (defun quick-sort (list key)
   (__quick-sort (map (lambda (elem) (cons (key elem) elem)) list)))
-  
+
 (defun __quick-sort (list)
   (if (atom list)
     0
