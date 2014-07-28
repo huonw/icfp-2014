@@ -94,6 +94,46 @@
            (lambda (a) (if (= (car a) x) (= (cdr a) y) 0))
            point-list))))
 
+(defun quick-sort (list key)
+  (__quick-sort (map (lambda (elem) (cons (key elem) elem)) list)))
+  
+(defun __quick-sort (list)
+  (if (atom list)
+    0
+    (let ((pivot (car list))
+          (bigger 0)
+          (smaller 0))
+    (let ((pivot-value (car pivot)))
+      (set list (cdr list))
+      (until (atom list)
+        (let ((head (car list)))
+        (let ((key (car head)))
+          (set list (cdr list))
+          (if (> key pivot-value)
+            (set bigger (cons head bigger))
+            (set smaller (cons head smaller))
+          )
+        ))
+      )
+      (append (__quick-sort smaller) (cons (cdr pivot) (__quick-sort bigger)))
+    ))
+  )
+)
+
+(defun which-min (f list)
+  (let ((min 50000) (which -1) (curr -1) (v 0) (i 0))
+  (until (atom list)
+    (set curr (car list))
+    (set list (cdr list))
+    (set v (f curr))
+    (if (> min v)
+      (do (set min v) (set which i))
+      (pass)
+    )
+    (set i (+ i 1))
+  )
+  (cons which min)
+))
 ; create a new list with elem on the back
 (defun push-back (list elem)
   (if (atom list)
@@ -116,3 +156,5 @@
 
 ; place x onto the stack twice
 (defun dup (x) (do x x))
+
+(defun print (x) (dbug x) x)

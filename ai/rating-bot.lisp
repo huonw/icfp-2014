@@ -5,12 +5,14 @@
 (const WALL_PENALTY -1000000)
 (const GHOST_0_PENALTY -5000000)
 (const GHOST_1_PENALTY -10000)
-(const GHOST_2_PENALTY -500)
+(const GHOST_2_PENALTY -1000)
 (const PILL_BONUS 100)
-(const RECENTLY_VISITED_PENALTY_MULTIPLIER -50)
+(const PILL_DRIFT_BONUS 50)
+(const RECENTLY_VISITED_PENALTY_MULTIPLIER -5)
 
 (defun main (world undefined)
-  (cons (make-list 20 (cons 0 0)) step))
+  (let ((pills (pills (car world))))
+    (cons (cons pills (make-list 200 (cons 0 0))) step)))
 
 (defun for-each (f list)
   (if (atom list)
@@ -23,13 +25,20 @@
   (let ((player (car (cdr world)))
         (world-map (car world))
         (ghost-info (tuple-nth world 4 2))
-        (recently-visited state))
+        (recently-visited (cdr state))
+        (pills (car state)))
   (let ((player-pos (car (cdr player))) (player-dir (tuple-nth player 5 2)))
   (let ((player-x (car player-pos))
         (player-y (cdr player-pos))
         (ghost-0 (generate-ghost-pos-0 ghost-info))
         (ghost-1 (generate-ghost-pos-1 ghost-info))
         (ghost-2 (generate-ghost-pos-2 ghost-info)))
+  (let ((pills 
+          (quick-sort pills 
+            (lambda (pill)
+              (let ((pill-x (car pill)) (pill-y (cdr pill)))
+                (+ (abs (- pill-x player-x)) (abs (- pill-y player-y))))))))
+  (dbug 12346)
   (let ((dir-with-xy-v
     (lambda (dir)
       (let ((new-pos (inc player-x player-y dir)))
@@ -37,7 +46,32 @@
     (let ((up 0)
           (down 0)
           (left 0)
-          (right 0))
+          (right 0)
+          (found-a-pill 0))
+      (until (if (atom pills) 1 found-a-pill)
+        (let ((pill (car pills)))
+        (let ((pill-x (car pill)) (pill-y (cdr pill)))
+          (if (pill-or-better (2d-nth world-map pill-x pill-y)) ; pill still there
+            ; use this pill
+            (do
+              (set found-a-pill 1)
+              (if (> pill-x player-x) 
+                (set right (+ right PILL_DRIFT_BONUS))
+                (if (> player-x pill-x)
+                  (set left (+ left PILL_DRIFT_BONUS))
+                  (pass)
+                )
+              )
+              (if (> pill-y player-y) 
+                (set down (+ down PILL_DRIFT_BONUS))
+                (if (> player-y pill-y)
+                  (set up (+ up PILL_DRIFT_BONUS))
+                  (pass)
+                )
+              )
+            )
+            (set pills (cdr pills))
+        ))))
     (let
           ((places
            (cons (cons (dir-with-xy-v UP) (lambda (d) (set up (+ up d))))
@@ -66,6 +100,7 @@
                 (* (count recently-visited (cdr (car s)))
                    RECENTLY_VISITED_PENALTY_MULTIPLIER))
             ) ; recently visited cells
+            ;(cons (lambda (s))
            ; ...
              0)))))
           )
@@ -79,10 +114,26 @@
       ; find the best one
       ;(dbug (cons (cons up down) (cons left right)))
       (let ((m (max up (max down (max left right)))))
-        (cons (update-list recently-visited player-pos) (if (= m up) UP
+        (cons (cons pills (update-list recently-visited player-pos)) (if (= m up) UP
           (if (= m down) DOWN
             (if (= m left) LEFT
               RIGHT))))
-      ))))))))
+      )))))))))
 
 (defun update-list (list elem) (push-back (cdr list) elem))
+
+(defun pills (world)
+  (__pills-inner (car world) (cdr world) 0 0)
+)
+
+(defun __pills-inner (row future_rows x y)
+  (if (atom row)
+    (if (atom future_rows) 0 (__pills-inner (car future_rows) (cdr future_rows) 0 (+ y 1)))
+    (let ((future_pills (__pills-inner (cdr row) future_rows (+ x 1) y)))
+      (if (if (= (car row) PILL) 1 (= (car row) POWER_PILL))
+        (cons (cons x y) future_pills) ; pill
+        future_pills ; not pill
+      )
+    )
+  )
+)
